@@ -1,3 +1,4 @@
+
 package com.android.posanof.ui.transaction.scanner
 
 import android.Manifest
@@ -34,10 +35,12 @@ import com.android.posanof.ui.components.CameraScannerView
 import com.android.posanof.ui.components.ManualProductSearchDialog
 import com.android.posanof.ui.transaction.POSTransactionViewModel
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Layar / Komponen Pemindaian Barcode POS.
- * Mengintegrasikan CameraX + ML Kit dengan penanganan Runtime Permission Kamera.
+ * Layar pemindaian barcode POS.
+ * Mencegah proses scan berjalan bersamaan dan menjaga dialog manual
+ * agar tidak terganggu oleh hasil scan berikutnya.
  */
 @Composable
 fun POSScannerScreen(
@@ -48,10 +51,19 @@ fun POSScannerScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var showManualDialog by remember { mutableStateOf(false) }
-    var unresolvedBarcode by remember { mutableStateOf<String?>(null) }
+    var showManualDialog by remember {
+        mutableStateOf(false)
+    }
 
-    // --- State Runtime Permission Kamera ---
+    var unresolvedBarcode by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    // Pengaman agar beberapa callback scan tidak diproses bersamaan.
+    val scanInProgress = remember {
+        AtomicBoolean(false)
+    }
+
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -65,8 +77,13 @@ fun POSScannerScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasCameraPermission = isGranted
+
         if (!isGranted) {
-            Toast.makeText(context, "Izin kamera diperlukan untuk memindai barcode.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                "Izin kamera diperlukan untuk memindai barcode.",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -76,33 +93,63 @@ fun POSScannerScreen(
         }
     }
 
-    val allProducts by productRepository.getAllProducts().collectAsState(initial = emptyList())
+    val allProducts by productRepository
+        .getAllProducts()
+        .collectAsState(initial = emptyList())
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
         if (hasCameraPermission) {
-            // 1. Pemindai Kamera CameraX + ML Kit (jika izin diberikan)
             CameraScannerView(
                 modifier = Modifier.fillMaxSize(),
                 onBarcodeScanned = { scannedBarcode ->
-                    coroutineScope.launch {
-                        val product = productRepository.findProductByBarcode(scannedBarcode)
-                        if (product != null) {
-                            viewModel.addToCart(product)
-                            Toast.makeText(
-                                context,
-                                "Ditambahkan: ${product.name}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            // Barcode tidak terdaftar / tidak ditemukan di DB -> Tampilkan dialog manual
-                            unresolvedBarcode = scannedBarcode
-                            showManualDialog = true
+                    // Abaikan callback ketika pemindaian sebelumnya
+                    // sedang diproses atau dialog manual terbuka.
+                    if (
+                        !showManualDialog &&
+                        scanInProgress.compareAndSet(false, true)
+                    ) {
+                        coroutineScope.launch {
+                            var waitingForManualSelection = false
+
+                            try {
+                                val product =
+                                    productRepository.findProductByBarcode(
+                                        scannedBarcode
+                                    )
+
+                                if (product != null) {
+                                    viewModel.addToCart(product)
+
+                                    Toast.makeText(
+                                        context,
+                                        "Ditambahkan: ${product.name}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    unresolvedBarcode = scannedBarcode
+                                    showManualDialog = true
+
+                                    // Kunci tetap aktif sampai dialog ditutup.
+                                    waitingForManualSelection = true
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    "Gagal mencari produk. Silakan coba lagi.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } finally {
+                                if (!waitingForManualSelection) {
+                                    scanInProgress.set(false)
+                                }
+                            }
                         }
                     }
                 }
             )
         } else {
-            // Tampilan Peringatan Izin Kamera
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -115,19 +162,26 @@ fun POSScannerScreen(
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.error
                 )
+
                 Spacer(modifier = Modifier.height(8.dp))
+
                 Text(
                     text = "Aplikasi membutuhkan izin akses kamera untuk memindai barcode produk.",
                     style = MaterialTheme.typography.bodyMedium
                 )
+
                 Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+
+                Button(
+                    onClick = {
+                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                ) {
                     Text("Berikan Izin Kamera")
                 }
             }
         }
 
-        // 2. Tombol Cari Manual (jika barcode fisik rusak / tidak dapat dibaca kamera)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -140,12 +194,17 @@ fun POSScannerScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimary
                 )
+
                 Spacer(modifier = Modifier.height(12.dp))
             }
+
             Button(
                 onClick = {
-                    unresolvedBarcode = null
-                    showManualDialog = true
+                    // Hentikan pemrosesan scan saat pencarian manual dibuka.
+                    if (scanInProgress.compareAndSet(false, true)) {
+                        unresolvedBarcode = null
+                        showManualDialog = true
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -153,15 +212,17 @@ fun POSScannerScreen(
             }
         }
 
-        // 3. Dialog Fallback Pencarian Manual
         if (showManualDialog) {
             ManualProductSearchDialog(
                 scannedBarcode = unresolvedBarcode,
                 productList = allProducts,
                 onProductSelected = { selectedProduct ->
                     viewModel.addToCart(selectedProduct)
+
                     showManualDialog = false
                     unresolvedBarcode = null
+                    scanInProgress.set(false)
+
                     Toast.makeText(
                         context,
                         "Ditambahkan: ${selectedProduct.name}",
@@ -171,6 +232,7 @@ fun POSScannerScreen(
                 onDismiss = {
                     showManualDialog = false
                     unresolvedBarcode = null
+                    scanInProgress.set(false)
                 }
             )
         }
