@@ -79,11 +79,10 @@ fun KasirRoute(
 
     if (showCart) {
         BackHandler { showCart = false }
-        POSScreen(
+        CartRoute(
             viewModel = viewModel,
-            productRepository = productRepository,
-            modifier = modifier,
-            initialTab = 1 // langsung buka tab Keranjang
+            onBack = { showCart = false },
+            modifier = modifier
         )
     } else {
         KasirScreen(
