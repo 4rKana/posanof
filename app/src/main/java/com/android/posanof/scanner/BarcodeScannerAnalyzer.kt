@@ -68,4 +68,15 @@ class BarcodeScannerAnalyzer(
                 imageProxy.close()
             }
     }
+
+    /**
+     * Menutup ML Kit Barcode Scanner client untuk membebaskan resource.
+     */
+    fun close() {
+        try {
+            scanner.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 }

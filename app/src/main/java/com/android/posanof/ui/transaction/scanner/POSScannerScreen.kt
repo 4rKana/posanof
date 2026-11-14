@@ -60,6 +60,7 @@ import com.android.posanof.ui.components.PosTopBar
 import com.android.posanof.ui.components.toRupiah
 import com.android.posanof.ui.transaction.POSTransactionViewModel
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 private val ScanBackground = Color(0xFF161D1B)
 private val ScanAccent = Color(0xFF5EEAD4)
@@ -74,7 +75,8 @@ private class ScanGate {
 
 /**
  * Layar Pindai Barcode (desain Figma layar 2).
- * Logika scan, izin kamera, dan pencarian manual tetap sama seperti sebelumnya.
+ * Mencegah proses scan berjalan bersamaan dan menjaga dialog manual
+ * agar tidak terganggu oleh hasil scan berikutnya.
  */
 @Composable
 fun POSScannerScreen(
@@ -92,6 +94,9 @@ fun POSScannerScreen(
     var unresolvedBarcode by remember { mutableStateOf<String?>(null) }
     var detectedProduct by remember { mutableStateOf<ProductEntity?>(null) }
 
+    // Pengaman agar beberapa callback scan tidak diproses bersamaan.
+    val scanInProgress = remember { AtomicBoolean(false) }
+
     // --- State Runtime Permission Kamera ---
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -106,8 +111,13 @@ fun POSScannerScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasCameraPermission = isGranted
+
         if (!isGranted) {
-            Toast.makeText(context, "Izin kamera diperlukan untuk memindai barcode.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                "Izin kamera diperlukan untuk memindai barcode.",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -117,7 +127,9 @@ fun POSScannerScreen(
         }
     }
 
-    val allProducts by productRepository.getAllProducts().collectAsState(initial = emptyList())
+    val allProducts by productRepository
+        .getAllProducts()
+        .collectAsState(initial = emptyList())
 
     Column(modifier.fillMaxSize().background(ScanBackground)) {
         PosTopBar(title = "Pindai Barcode", onBack = onBack, dark = true)
@@ -137,19 +149,48 @@ fun POSScannerScreen(
                         val now = System.currentTimeMillis()
                         val sameAsLast = scannedBarcode == scanGate.barcode &&
                                 now - scanGate.lastSeenAt < SCAN_COOLDOWN_MS
-                        scanGate.barcode = scannedBarcode
-                        scanGate.lastSeenAt = now
-                        if (sameAsLast) return@CameraScannerView
 
-                        coroutineScope.launch {
-                            val product = productRepository.findProductByBarcode(scannedBarcode)
-                            if (product != null) {
-                                viewModel.addToCart(product)
-                                detectedProduct = product
-                            } else {
-                                // Barcode tidak terdaftar -> tampilkan pencarian manual
-                                unresolvedBarcode = scannedBarcode
-                                showManualDialog = true
+                        if (sameAsLast) {
+                            // Barcode yang sama masih di depan kamera: bukan scan baru.
+                            scanGate.lastSeenAt = now
+                        } else if (
+                        // Abaikan callback ketika pemindaian sebelumnya sedang
+                        // diproses atau dialog manual sedang terbuka.
+                            !showManualDialog &&
+                            scanInProgress.compareAndSet(false, true)
+                        ) {
+                            scanGate.barcode = scannedBarcode
+                            scanGate.lastSeenAt = now
+
+                            coroutineScope.launch {
+                                var waitingForManualSelection = false
+
+                                try {
+                                    val product =
+                                        productRepository.findProductByBarcode(scannedBarcode)
+
+                                    if (product != null) {
+                                        viewModel.addToCart(product)
+                                        detectedProduct = product
+                                    } else {
+                                        // Barcode tidak terdaftar -> tampilkan pencarian manual
+                                        unresolvedBarcode = scannedBarcode
+                                        showManualDialog = true
+
+                                        // Kunci tetap aktif sampai dialog ditutup.
+                                        waitingForManualSelection = true
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(
+                                        context,
+                                        "Gagal mencari produk. Silakan coba lagi.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } finally {
+                                    if (!waitingForManualSelection) {
+                                        scanInProgress.set(false)
+                                    }
+                                }
                             }
                         }
                     }
@@ -197,8 +238,11 @@ fun POSScannerScreen(
         ScanResultPanel(
             product = detectedProduct,
             onManualSearch = {
-                unresolvedBarcode = null
-                showManualDialog = true
+                // Hentikan pemrosesan scan saat pencarian manual dibuka.
+                if (scanInProgress.compareAndSet(false, true)) {
+                    unresolvedBarcode = null
+                    showManualDialog = true
+                }
             },
             onViewCart = onViewCart
         )
@@ -212,12 +256,15 @@ fun POSScannerScreen(
             onProductSelected = { selectedProduct ->
                 viewModel.addToCart(selectedProduct)
                 detectedProduct = selectedProduct
+
                 showManualDialog = false
                 unresolvedBarcode = null
+                scanInProgress.set(false)
             },
             onDismiss = {
                 showManualDialog = false
                 unresolvedBarcode = null
+                scanInProgress.set(false)
             }
         )
     }

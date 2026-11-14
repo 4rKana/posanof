@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -23,9 +24,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.android.posanof.scanner.BarcodeScannerAnalyzer
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Komponen Compose CameraX Preview untuk pemindaian Barcode.
+ * Komponen Compose CameraX Preview untuk pemindaian barcode.
  *
  * [showFrame] = true menampilkan kotak panduan bawaan di tengah.
  * Set false kalau layar pemanggil menggambar bingkainya sendiri (mis. POSScannerScreen).
@@ -38,62 +40,108 @@ fun CameraScannerView(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
-    val previewView = remember { PreviewView(context) }
 
-    DisposableEffect(Unit) {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+    // Selalu gunakan callback terbaru dari Compose.
+    val currentOnBarcodeScanned = rememberUpdatedState(onBarcodeScanned)
 
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
+    val previewView = remember(context) {
+        PreviewView(context)
+    }
 
-            val preview = Preview.Builder().build().also {
-                it.surfaceProvider = previewView.surfaceProvider
-            }
+    DisposableEffect(context, lifecycleOwner) {
+        val cameraExecutor = Executors.newSingleThreadExecutor()
+        val isDisposed = AtomicBoolean(false)
+        val mainExecutor = ContextCompat.getMainExecutor(context)
 
-            val imageAnalysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also { analysis ->
-                    analysis.setAnalyzer(
-                        cameraExecutor,
-                        BarcodeScannerAnalyzer(onBarcodeDetected = onBarcodeScanned)
-                    )
+        val cameraProviderFuture =
+            ProcessCameraProvider.getInstance(context)
+
+        var cameraProvider: ProcessCameraProvider? = null
+        var imageAnalysis: ImageAnalysis? = null
+        var barcodeAnalyzer: BarcodeScannerAnalyzer? = null
+
+        cameraProviderFuture.addListener(
+            {
+                if (isDisposed.get()) {
+                    return@addListener
                 }
 
-            val cameraSelector = if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
-                CameraSelector.DEFAULT_BACK_CAMERA
-            } else if (cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)) {
-                CameraSelector.DEFAULT_FRONT_CAMERA
-            } else {
-                CameraSelector.DEFAULT_BACK_CAMERA
-            }
+                var analyzer: BarcodeScannerAnalyzer? = null
+                var analysis: ImageAnalysis? = null
 
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector,
-                    preview,
-                    imageAnalysis
-                )
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }, ContextCompat.getMainExecutor(context))
+                try {
+                    val provider = cameraProviderFuture.get()
+                    cameraProvider = provider
+
+                    if (isDisposed.get()) {
+                        return@addListener
+                    }
+
+                    val preview = Preview.Builder()
+                        .build()
+                        .also {
+                            it.surfaceProvider = previewView.surfaceProvider
+                        }
+
+                    analyzer = BarcodeScannerAnalyzer(
+                        onBarcodeDetected = { barcode ->
+                            if (!isDisposed.get()) {
+                                currentOnBarcodeScanned.value(barcode)
+                            }
+                        }
+                    )
+                    barcodeAnalyzer = analyzer
+
+                    analysis = ImageAnalysis.Builder()
+                        .setBackpressureStrategy(
+                            ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+                        )
+                        .build()
+                        .also {
+                            it.setAnalyzer(cameraExecutor, analyzer)
+                        }
+
+                    imageAnalysis = analysis
+
+                    // Menggunakan CameraSelector default (Kamera Belakang)
+                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                    provider.unbindAll()
+                    provider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        preview,
+                        analysis
+                    )
+                } catch (e: Exception) {
+                    analysis?.clearAnalyzer()
+                    analyzer?.close()
+                    e.printStackTrace()
+                }
+            },
+            mainExecutor
+        )
 
         onDispose {
+            isDisposed.set(true)
+
+            imageAnalysis?.clearAnalyzer()
+            cameraProvider?.unbindAll()
+            barcodeAnalyzer?.close()
+
             cameraExecutor.shutdown()
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
         AndroidView(
             factory = { previewView },
             modifier = Modifier.fillMaxSize()
         )
 
-        // Frame panduan pemindaian di tengah layar (opsional)
+        // Frame panduan pemindaian di tengah layar (opsional).
         if (showFrame) {
             Box(
                 modifier = Modifier
