@@ -1,23 +1,30 @@
+
 package com.android.posanof.scanner
 
 import android.annotation.SuppressLint
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * ImageAnalysis.Analyzer menggunakan Google ML Kit Vision untuk membaca
- * Barcode EAN-13, EAN-8, QR Code, dan format standar lainnya dari CameraX.
+ * Analyzer CameraX menggunakan Google ML Kit untuk membaca barcode.
+ *
+ * Mencegah pemrosesan frame secara bersamaan, mengurangi scan berulang,
+ * dan memilih barcode dengan area deteksi terbesar.
  */
 class BarcodeScannerAnalyzer(
-    private val onBarcodeDetected: (String) -> Unit,
-    private val cooldownMillis: Long = 1500L
+    private val onBarcodeDetected: (String) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    private var lastScanTimestamp: Long = 0L
+    private val isProcessing = AtomicBoolean(false)
+    private val isClosed = AtomicBoolean(false)
+
+    private var lastDetectedBarcode: String? = null
+    private var consecutiveEmptyFrames = 0
 
     private val options = BarcodeScannerOptions.Builder()
         .setBarcodeFormats(
@@ -35,38 +42,96 @@ class BarcodeScannerAnalyzer(
 
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
+        if (isClosed.get()) {
+            imageProxy.close()
+            return
+        }
+
+        if (!isProcessing.compareAndSet(false, true)) {
+            imageProxy.close()
+            return
+        }
+
         val mediaImage = imageProxy.image
+
         if (mediaImage == null) {
             imageProxy.close()
+            isProcessing.set(false)
             return
         }
 
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastScanTimestamp < cooldownMillis) {
-            imageProxy.close()
-            return
-        }
+        try {
+            val inputImage = InputImage.fromMediaImage(
+                mediaImage,
+                imageProxy.imageInfo.rotationDegrees
+            )
 
-        val inputImage = InputImage.fromMediaImage(
-            mediaImage,
-            imageProxy.imageInfo.rotationDegrees
-        )
+            scanner.process(inputImage)
+                .addOnSuccessListener { barcodes ->
+                    if (isClosed.get()) {
+                        return@addOnSuccessListener
+                    }
 
-        scanner.process(inputImage)
-            .addOnSuccessListener { barcodes ->
-                val detectedBarcode = barcodes.firstOrNull { !it.rawValue.isNullOrEmpty() }
-                if (detectedBarcode != null) {
-                    val barcodeValue = detectedBarcode.rawValue.orEmpty()
-                    lastScanTimestamp = System.currentTimeMillis()
-                    onBarcodeDetected(barcodeValue)
+                    // Pilih barcode dengan area bounding box terbesar.
+                    val detectedBarcode = barcodes
+                        .filter { !it.rawValue.isNullOrBlank() }
+                        .maxByOrNull { barcode ->
+                            val box = barcode.boundingBox
+
+                            if (box == null) {
+                                0L
+                            } else {
+                                box.width().toLong() * box.height().toLong()
+                            }
+                        }
+
+                    val barcodeValue = detectedBarcode?.rawValue
+
+                    if (barcodeValue == null) {
+                        consecutiveEmptyFrames++
+
+                        // Reset hanya setelah lima frame berhasil diproses
+                        // tanpa barcode yang dapat dibaca.
+                        if (consecutiveEmptyFrames >= 5) {
+                            lastDetectedBarcode = null
+                        }
+                    } else {
+                        consecutiveEmptyFrames = 0
+
+                        // Barcode yang sama tidak dikirim berulang kali
+                        // selama masih terdeteksi.
+                        if (barcodeValue != lastDetectedBarcode) {
+                            lastDetectedBarcode = barcodeValue
+
+                            try {
+                                onBarcodeDetected(barcodeValue)
+                            } catch (exception: Exception) {
+                                // Cegah error callback menghentikan analyzer.
+                                exception.printStackTrace()
+                            }
+                        }
+                    }
                 }
-            }
-            .addOnFailureListener {
-                // Abaikan error pembacaan frame individual
-            }
-            .addOnCompleteListener {
-                imageProxy.close()
-            }
+                .addOnFailureListener { exception ->
+                    // Kegagalan satu frame tidak langsung mereset
+                    // barcode terakhir yang terdeteksi.
+                    exception.printStackTrace()
+                }
+                .addOnCompleteListener {
+                    imageProxy.close()
+                    isProcessing.set(false)
+                }
+        } catch (exception: Exception) {
+            imageProxy.close()
+            isProcessing.set(false)
+            exception.printStackTrace()
+        }
+    }
+
+    fun close() {
+        if (isClosed.compareAndSet(false, true)) {
+            scanner.close()
+        }
     }
 
     /**
