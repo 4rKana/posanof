@@ -26,14 +26,10 @@ import java.util.concurrent.Executors
 
 /**
  * Komponen Compose CameraX Preview untuk pemindaian Barcode.
- *
- * [showFrame] = true menampilkan kotak panduan bawaan di tengah.
- * Set false kalau layar pemanggil menggambar bingkainya sendiri (mis. POSScannerScreen).
  */
 @Composable
 fun CameraScannerView(
     modifier: Modifier = Modifier,
-    showFrame: Boolean = true,
     onBarcodeScanned: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -93,18 +89,16 @@ fun CameraScannerView(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Frame panduan pemindaian di tengah layar (opsional)
-        if (showFrame) {
-            Box(
-                modifier = Modifier
-                    .size(260.dp, 160.dp)
-                    .align(Alignment.Center)
-                    .border(
-                        width = 3.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-            )
-        }
+        // Frame panduan pemindaian di tengah layar
+        Box(
+            modifier = Modifier
+                .size(260.dp, 160.dp)
+                .align(Alignment.Center)
+                .border(
+                    width = 3.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(12.dp)
+                )
+        )
     }
 }
