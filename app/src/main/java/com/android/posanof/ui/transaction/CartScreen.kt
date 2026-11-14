@@ -1,6 +1,11 @@
 package com.android.posanof.ui.transaction
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -22,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -43,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,8 +67,6 @@ import com.android.posanof.ui.components.PosTextField
 import com.android.posanof.ui.components.PosTopBar
 import com.android.posanof.ui.components.PosWarningBox
 import com.android.posanof.ui.components.toRupiah
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.ui.text.style.TextOverflow
 
 // =====================================================================
 // ROUTE: menghubungkan CartScreen dengan POSTransactionViewModel
@@ -84,70 +88,93 @@ fun CartRoute(
     val customerPhone by viewModel.customerPhone.collectAsState()
     val checkoutResult by viewModel.checkoutResult.collectAsState()
 
-    CartScreen(
-        items = items,
-        total = total,
-        cashAmount = cashAmount,
-        changeAmount = changeAmount,
-        method = method,
-        customerName = customerName,
-        customerPhone = customerPhone,
-        isProcessing = checkoutResult is CheckoutResult.Loading,
-        onBack = onBack,
-        onQuantityChange = viewModel::updateQuantity,
-        onClearCart = viewModel::clearCart,
-        onMethodChange = viewModel::updatePaymentMethod,
-        onCashChange = viewModel::updateCashAmount,
-        onCustomerChange = viewModel::updateCustomerInfo,
-        onCheckout = viewModel::checkout,
-        modifier = modifier
-    )
+    // Setelah checkout sukses, ViewModel mengosongkan keranjang, uang, dan data pelanggan.
+    // Jadi datanya dicatat dulu sesaat sebelum checkout untuk layar sukses dan struk.
+    var snapTotal by rememberSaveable { mutableStateOf(0.0) }
+    var snapCash by rememberSaveable { mutableStateOf(0.0) }
+    var snapIsCash by rememberSaveable { mutableStateOf(true) }
+    var snapName by rememberSaveable { mutableStateOf("") }
+    var snapPhone by rememberSaveable { mutableStateOf("") }
+    var snapTime by rememberSaveable { mutableStateOf(0L) }
+    var snapItems by rememberSaveable { mutableStateOf("") }
 
-    // Hasil checkout. SEMENTARA berupa dialog; akan diganti layar "Transaksi Berhasil" (layar 5).
-    when (val result = checkoutResult) {
-        is CheckoutResult.Success -> {
-            AlertDialog(
-                onDismissRequest = {
-                    viewModel.resetCheckoutResult()
-                    onBack()
-                },
-                title = { Text("Transaksi Berhasil!", fontWeight = FontWeight.Bold) },
-                text = {
-                    Column {
-                        Text("ID Transaksi: #${result.transactionId}")
-                        Spacer(Modifier.height(8.dp))
-                        if (method == PaymentMethod.TUNAI) {
-                            Text(
-                                "Kembalian: ${result.changeAmount.toLong().toRupiah()}",
-                                fontWeight = FontWeight.Bold,
-                                color = PosPrimary
-                            )
-                        } else {
-                            Text("Transaksi Kasbon dicatat (Belum Lunas).")
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        viewModel.resetCheckoutResult()
-                        onBack()
-                    }) {
-                        Text("Selesai", color = PosPrimary, fontWeight = FontWeight.SemiBold)
-                    }
+    val result = checkoutResult
+    if (result is CheckoutResult.Success) {
+        val finish = {
+            viewModel.resetCheckoutResult()
+            onBack()
+        }
+        BackHandler(onBack = finish)
+
+        val rows = mutableListOf<Pair<String, String>>()
+        rows.add("No. Transaksi" to "#" + result.transactionId.toString().padStart(4, '0'))
+        rows.add("Tanggal" to formatReceiptDate(snapTime))
+        if (snapIsCash) {
+            rows.add("Metode" to "Tunai")
+            rows.add("Uang diterima" to snapCash.toLong().toRupiah())
+            rows.add("Kembalian" to result.changeAmount.toLong().toRupiah())
+        } else {
+            rows.add("Metode" to "Kasbon")
+            if (snapName.isNotBlank()) rows.add("Pelanggan" to snapName)
+            rows.add("Nominal hutang" to snapTotal.toLong().toRupiah())
+        }
+
+        TransactionSuccessScreen(
+            total = snapTotal.toLong(),
+            rows = rows,
+            statusBadge = if (snapIsCash) null else "Belum Lunas",
+            onSendWhatsApp = {
+                val text = buildReceiptText(rows, snapItems, snapTotal.toLong().toRupiah())
+                shareReceiptToWhatsApp(context, snapPhone, text)
+            },
+            onSavePdf = {
+                Toast.makeText(context, "Simpan PDF: segera hadir", Toast.LENGTH_SHORT).show()
+            },
+            onNewTransaction = finish,
+            modifier = modifier
+        )
+    } else {
+        CartScreen(
+            items = items,
+            total = total,
+            cashAmount = cashAmount,
+            changeAmount = changeAmount,
+            method = method,
+            customerName = customerName,
+            customerPhone = customerPhone,
+            isProcessing = result is CheckoutResult.Loading,
+            onBack = onBack,
+            onQuantityChange = viewModel::updateQuantity,
+            onClearCart = viewModel::clearCart,
+            onMethodChange = viewModel::updatePaymentMethod,
+            onCashChange = viewModel::updateCashAmount,
+            onCustomerChange = viewModel::updateCustomerInfo,
+            onCheckout = {
+                snapTotal = total
+                snapCash = cashAmount
+                snapIsCash = method == PaymentMethod.TUNAI
+                snapName = customerName.trim()
+                snapPhone = customerPhone.trim()
+                snapTime = System.currentTimeMillis()
+                snapItems = items.joinToString("\n") {
+                    "${it.quantity}x ${it.product.name} - ${it.subTotal.toLong().toRupiah()}"
                 }
-            )
-        }
+                viewModel.checkout()
+            },
+            modifier = modifier
+        )
+    }
 
-        is CheckoutResult.Error -> {
-            LaunchedEffect(result.message) {
-                Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
-                viewModel.resetCheckoutResult()
-            }
+    if (result is CheckoutResult.Error) {
+        LaunchedEffect(result.message) {
+            Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            viewModel.resetCheckoutResult()
         }
-
-        else -> Unit
     }
 }
+
+private fun formatReceiptDate(millis: Long): String =
+    SimpleDateFormat("dd MMM yyyy, HH.mm", Locale.forLanguageTag("id-ID")).format(Date(millis))
 
 // =====================================================================
 // 3 & 4. KERANJANG (Tunai / Kasbon)
@@ -370,10 +397,10 @@ private fun CartLineRow(item: CartItem, onQuantityChange: (Int, Int) -> Unit) {
             "${item.quantity}",
             Modifier.widthIn(min = 28.dp),
             textAlign = TextAlign.Center,
-            maxLines = 1,
-            softWrap = false,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp
+            fontSize = 13.sp,
+            maxLines = 1,
+            softWrap = false
         )
         StepButton(Icons.Default.Add, filled = true, enabled = item.quantity < product.stock) {
             onQuantityChange(product.id, item.quantity + 1)
@@ -382,10 +409,10 @@ private fun CartLineRow(item: CartItem, onQuantityChange: (Int, Int) -> Unit) {
             item.subTotal.toLong().toRupiah().removePrefix("Rp "),
             Modifier.widthIn(min = 64.dp).padding(start = 6.dp),
             textAlign = TextAlign.End,
-            maxLines = 1,
-            softWrap = false,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp
+            fontSize = 13.sp,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }
