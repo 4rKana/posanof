@@ -27,4 +27,7 @@ data class ProductEntity(
 
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis(),
+
+    @ColumnInfo(name = "category")
+    val category: String = "",
 )

@@ -84,6 +84,7 @@ fun POSScreen(
     viewModel: POSTransactionViewModel,
     productRepository: ProductRepository,
     modifier: Modifier = Modifier,
+    initialTab: Int = 0,
 ) {
     val context = LocalContext.current
     val numberFormatter = remember { NumberFormat.getNumberInstance(Locale.forLanguageTag("id-ID")) }
@@ -105,7 +106,7 @@ fun POSScreen(
     var showCameraScanner by remember { mutableStateOf(false) }
 
     // Tab terpilih khusus Mode Portrait HP (0 = Katalog Produk, 1 = Keranjang)
-    var compactTabSelected by remember { mutableStateOf(0) }
+    var compactTabSelected by remember { mutableStateOf(initialTab) }
 
     val filteredProducts = remember(searchQuery, allProducts) {
         if (searchQuery.isBlank()) {
