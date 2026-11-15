@@ -118,21 +118,16 @@ fun KasirRoute(
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             Surface(modifier = Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxSize()) {
-                    POSScannerScreen(
-                        viewModel = viewModel,
-                        productRepository = productRepository,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    IconButton(
-                        onClick = { showScanner = false },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(16.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Tutup", tint = Color.White)
+                POSScannerScreen(
+                    viewModel = viewModel,
+                    productRepository = productRepository,
+                    modifier = Modifier.fillMaxSize(),
+                    onBack = { showScanner = false },
+                    onViewCart = {
+                        showScanner = false
+                        showCart = true
                     }
-                }
+                )
             }
         }
     }
