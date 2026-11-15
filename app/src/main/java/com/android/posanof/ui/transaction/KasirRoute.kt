@@ -30,9 +30,6 @@ import com.android.posanof.ui.transaction.scanner.POSScannerScreen
 /**
  * Penghubung antara tampilan baru (KasirScreen) dan data asli
  * (POSTransactionViewModel + ProductRepository).
- *
- * SEMENTARA: tombol bar keranjang membuka POSScreen lama (tab Keranjang)
- * sampai layar Keranjang baru (layar 3 & 4) selesai dibuat.
  */
 @Composable
 fun KasirRoute(
@@ -79,11 +76,10 @@ fun KasirRoute(
 
     if (showCart) {
         BackHandler { showCart = false }
-        POSScreen(
+        CartRoute(
             viewModel = viewModel,
-            productRepository = productRepository,
-            modifier = modifier,
-            initialTab = 1 // langsung buka tab Keranjang
+            onBack = { showCart = false },
+            modifier = modifier
         )
     } else {
         KasirScreen(
