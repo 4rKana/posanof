@@ -40,7 +40,7 @@ class CreditViewModel(
 
     // --- State Flow Daftar Kasbon 'BELUM_LUNAS' ---
     val unpaidCredits: StateFlow<List<CreditEntity>> = combine(
-        creditRepository.getUnpaidCredits(),
+        creditRepository.getAllCredits(),
         _searchQuery
     ) { list, query ->
         if (query.isBlank()) {

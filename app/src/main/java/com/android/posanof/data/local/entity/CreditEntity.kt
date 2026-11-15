@@ -42,4 +42,11 @@ data class CreditEntity(
 
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis(),
-)
+) {
+    /**
+     * Helper property untuk mengecek apakah kasbon sudah lunas
+     * berdasarkan sisa hutang atau teks status-nya.
+     */
+    val isPaidOff: Boolean
+        get() = remainingDebt <= 0.0 || status.equals("LUNAS", ignoreCase = true)
+}
