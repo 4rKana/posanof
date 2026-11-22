@@ -234,7 +234,9 @@ fun POSScreen(
                                     onSearchQueryChange = { searchQuery = it },
                                     filteredProducts = filteredProducts,
                                     allProducts = allProducts,
+                                    cartItems = cartItems,
                                     onAddToCart = { viewModel.addToCart(it) },
+                                    onDecreaseCartItem = { viewModel.decreaseCartItem(it) },
                                     formatRp = ::formatRp
                                 )
                             }
@@ -310,7 +312,9 @@ fun POSScreen(
                             onSearchQueryChange = { searchQuery = it },
                             filteredProducts = filteredProducts,
                             allProducts = allProducts,
+                            cartItems = cartItems,
                             onAddToCart = { viewModel.addToCart(it) },
+                            onDecreaseCartItem = { viewModel.decreaseCartItem(it) },
                             formatRp = ::formatRp
                         )
                     }
@@ -388,7 +392,9 @@ private fun ProductCatalogSection(
     onSearchQueryChange: (String) -> Unit,
     filteredProducts: List<ProductEntity>,
     allProducts: List<ProductEntity>,
+    cartItems: List<CartItem>,
     onAddToCart: (ProductEntity) -> Unit,
+    onDecreaseCartItem: (ProductEntity) -> Unit,
     formatRp: (Double) -> String
 ) {
     OutlinedTextField(
@@ -427,9 +433,12 @@ private fun ProductCatalogSection(
                 items = filteredProducts,
                 key = { it.id }
             ) { product ->
+                val cartQuantity = cartItems.find { it.product.id == product.id }?.quantity ?: 0
                 ProductGridItem(
                     product = product,
+                    cartQuantity = cartQuantity,
                     onAddToCart = { onAddToCart(product) },
+                    onDecreaseCartItem = { onDecreaseCartItem(product) },
                     formatRp = formatRp
                 )
             }
@@ -563,80 +572,97 @@ private fun ColumnScope.CartAndPaymentSection(
                 label = { Text("KASBON", maxLines = 1) },
                 modifier = Modifier.weight(1f)
             )
+            FilterChip(
+                selected = selectedPaymentMethod == PaymentMethod.QRIS,
+                onClick = { viewModel.updatePaymentMethod(PaymentMethod.QRIS) },
+                label = { Text("QRIS", maxLines = 1) },
+                modifier = Modifier.weight(1f)
+            )
         }
 
-        if (selectedPaymentMethod == PaymentMethod.TUNAI) {
-            OutlinedTextField(
-                value = if (cashAmount == 0.0) "" else cashAmount.toLong().toString(),
-                onValueChange = { valValue ->
-                    val parsed = valValue.toDoubleOrNull() ?: 0.0
-                    viewModel.updateCashAmount(parsed)
-                },
-                label = { Text("Nominal Uang Tunai (Rp)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+        when(selectedPaymentMethod) {
+            PaymentMethod.TUNAI -> {
+                OutlinedTextField(
+                    value = if (cashAmount == 0.0) "" else cashAmount.toLong().toString(),
+                    onValueChange = { valValue ->
+                        val parsed = valValue.toDoubleOrNull() ?: 0.0
+                        viewModel.updateCashAmount(parsed)
+                    },
+                    label = { Text("Nominal Uang Tunai (Rp)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
 
-            // Chips Saran Uang Tunai
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { viewModel.updateCashAmount(totalAmount) },
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+                // Chips Saran Uang Tunai
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("Uang Pas", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                }
-                listOf(20000.0, 50000.0, 100000.0).forEach { suggested ->
-                    if (suggested >= totalAmount) {
-                        OutlinedButton(
-                            onClick = { viewModel.updateCashAmount(suggested) },
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
-                        ) {
-                            Text("${suggested.toInt() / 1000}k", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    OutlinedButton(
+                        onClick = { viewModel.updateCashAmount(totalAmount) },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+                    ) {
+                        Text("Uang Pas", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                    listOf(20000.0, 50000.0, 100000.0).forEach { suggested ->
+                        if (suggested >= totalAmount) {
+                            OutlinedButton(
+                                onClick = { viewModel.updateCashAmount(suggested) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+                            ) {
+                                Text("${suggested.toInt() / 1000}k", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Kembalian:", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    text = formatRp(changeAmount),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if ((cashAmount >= totalAmount) && totalAmount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    maxLines = 1
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Kembalian:", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = formatRp(changeAmount),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if ((cashAmount >= totalAmount) && totalAmount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        maxLines = 1
+                    )
+                }
+            }
+            PaymentMethod.KASBON -> {
+                OutlinedTextField(
+                    value = customerName,
+                    onValueChange = { name -> viewModel.updateCustomerInfo(name, customerPhone) },
+                    label = { Text("Nama Pelanggan *") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = customerPhone,
+                    onValueChange = { phone -> viewModel.updateCustomerInfo(customerName, phone) },
+                    label = { Text("No HP Pelanggan") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
             }
-        } else {
-            OutlinedTextField(
-                value = customerName,
-                onValueChange = { name -> viewModel.updateCustomerInfo(name, customerPhone) },
-                label = { Text("Nama Pelanggan *") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            OutlinedTextField(
-                value = customerPhone,
-                onValueChange = { phone -> viewModel.updateCustomerInfo(customerName, phone) },
-                label = { Text("No HP Pelanggan") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+            PaymentMethod.QRIS -> {
+                Text(
+                    text = "Pembayaran via QRIS. Transaksi akan dicatat lunas sebesar ${formatRp(totalAmount)}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -674,7 +700,9 @@ private fun ColumnScope.CartAndPaymentSection(
 @Composable
 private fun ProductGridItem(
     product: ProductEntity,
+    cartQuantity: Int,
     onAddToCart: () -> Unit,
+    onDecreaseCartItem: () -> Unit,
     formatRp: (Double) -> String
 ) {
     Card(
@@ -682,7 +710,10 @@ private fun ProductGridItem(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .clickable { onAddToCart() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (cartQuantity > 0) 4.dp else 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (cartQuantity > 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+        )
     ) {
         Column(
             modifier = Modifier.padding(10.dp)
@@ -691,12 +722,13 @@ private fun ProductGridItem(
                 text = product.name,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2
+                maxLines = 2,
+                color = if (cartQuantity > 0) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = formatRp(product.price),
-                color = MaterialTheme.colorScheme.primary,
+                color = if (cartQuantity > 0) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -709,15 +741,38 @@ private fun ProductGridItem(
                 Text(
                     text = "Stok: ${product.stock}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (product.stock <= product.minStock) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (product.stock <= product.minStock) MaterialTheme.colorScheme.error else if (cartQuantity > 0) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Button(
-                    onClick = onAddToCart,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.height(28.dp),
-                    enabled = product.stock > 0
-                ) {
-                    Text("+", style = MaterialTheme.typography.labelSmall)
+                if (cartQuantity > 0) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onDecreaseCartItem,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Remove, contentDescription = "Kurang")
+                        }
+                        Text(
+                            text = cartQuantity.toString(),
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(
+                            onClick = onAddToCart,
+                            modifier = Modifier.size(24.dp),
+                            enabled = product.stock > cartQuantity
+                        ) {
+                            Icon(imageVector = Icons.Default.Add, contentDescription = "Tambah")
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onAddToCart,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp),
+                        enabled = product.stock > 0
+                    ) {
+                        Text("+", style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }

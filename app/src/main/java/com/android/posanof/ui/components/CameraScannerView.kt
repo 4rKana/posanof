@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +38,7 @@ fun CameraScannerView(
     showFrame: Boolean = true,
     onBarcodeScanned: (String) -> Unit
 ) {
+    val currentOnBarcodeScanned by rememberUpdatedState(onBarcodeScanned)
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -43,9 +46,13 @@ fun CameraScannerView(
 
     DisposableEffect(Unit) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        var boundCameraProvider: ProcessCameraProvider? = null
+        var analyzer: BarcodeScannerAnalyzer? = null
 
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
+            boundCameraProvider = cameraProvider
+            analyzer = BarcodeScannerAnalyzer(onBarcodeDetected = { currentOnBarcodeScanned(it) })
 
             val preview = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
@@ -57,7 +64,7 @@ fun CameraScannerView(
                 .also { analysis ->
                     analysis.setAnalyzer(
                         cameraExecutor,
-                        BarcodeScannerAnalyzer(onBarcodeDetected = onBarcodeScanned)
+                        analyzer!!
                     )
                 }
 
@@ -83,6 +90,8 @@ fun CameraScannerView(
         }, ContextCompat.getMainExecutor(context))
 
         onDispose {
+            boundCameraProvider?.unbindAll()
+            analyzer?.close()
             cameraExecutor.shutdown()
         }
     }

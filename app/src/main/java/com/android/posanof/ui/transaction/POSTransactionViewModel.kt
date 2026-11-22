@@ -7,9 +7,14 @@ import com.android.posanof.data.local.entity.ProductEntity
 import com.android.posanof.data.local.entity.TransactionDetailEntity
 import com.android.posanof.data.local.entity.TransactionEntity
 import com.android.posanof.data.repository.TransactionRepository
+import com.android.posanof.data.local.SettingsManager
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -29,7 +34,8 @@ data class CartItem(
  */
 enum class PaymentMethod {
     TUNAI,
-    KASBON
+    KASBON,
+    QRIS
 }
 
 /**
@@ -47,21 +53,34 @@ sealed interface CheckoutResult {
  * Sesuai dengan spesifikasi MVVM + Offline-First Architecture pada PROJECT_CONTEXT.md.
  */
 class POSTransactionViewModel(
-    private val transactionRepository: TransactionRepository
+    private val transactionRepository: TransactionRepository,
+    private val settingsManager: SettingsManager
 ) : ViewModel() {
 
     // --- StateFlow Keranjang Belanja & Kalkulasi ---
     private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
     val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
 
-    private val _totalAmount = MutableStateFlow(0.0)
-    val totalAmount: StateFlow<Double> = _totalAmount.asStateFlow()
+    val subtotal = _cartItems.map { list -> list.sumOf { it.subTotal } }.stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+
+    val discountAmount = combine(subtotal, settingsManager.defaultDiscountPercent) { sub, percent ->
+        sub * percent / 100.0
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+
+    val taxAmount = combine(subtotal, discountAmount, settingsManager.taxEnabled) { sub, disc, taxEnabled ->
+        if (taxEnabled) (sub - disc) * 0.11 else 0.0
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+
+    val totalAmount = combine(subtotal, discountAmount, taxAmount) { sub, disc, tax ->
+        sub - disc + tax
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
 
     private val _cashAmount = MutableStateFlow(0.0)
     val cashAmount: StateFlow<Double> = _cashAmount.asStateFlow()
 
-    private val _changeAmount = MutableStateFlow(0.0)
-    val changeAmount: StateFlow<Double> = _changeAmount.asStateFlow()
+    val changeAmount = combine(totalAmount, cashAmount) { total, cash ->
+        if (cash >= total) cash - total else 0.0
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
 
     // --- StateFlow Pembayaran & Pelanggan ---
     private val _selectedPaymentMethod = MutableStateFlow(PaymentMethod.TUNAI)
@@ -104,7 +123,6 @@ class POSTransactionViewModel(
         }
 
         _cartItems.value = currentList
-        recalculateTotals()
     }
 
     /**
@@ -124,7 +142,24 @@ class POSTransactionViewModel(
                 }
             }
             _cartItems.value = currentList
-            recalculateTotals()
+        }
+    }
+
+    /**
+     * Mengurangi kuantitas item dalam keranjang. Jika menjadi 0, hapus dari keranjang.
+     */
+    fun decreaseCartItem(product: ProductEntity) {
+        val currentList = _cartItems.value.toMutableList()
+        val index = currentList.indexOfFirst { it.product.id == product.id }
+
+        if (index >= 0) {
+            val existingItem = currentList[index]
+            if (existingItem.quantity > 1) {
+                currentList[index] = existingItem.copy(quantity = existingItem.quantity - 1)
+            } else {
+                currentList.removeAt(index)
+            }
+            _cartItems.value = currentList
         }
     }
 
@@ -133,7 +168,6 @@ class POSTransactionViewModel(
      */
     fun removeFromCart(productId: Int) {
         _cartItems.update { list -> list.filterNot { it.product.id == productId } }
-        recalculateTotals()
     }
 
     /**
@@ -141,7 +175,6 @@ class POSTransactionViewModel(
      */
     fun clearCart() {
         _cartItems.value = emptyList()
-        recalculateTotals()
     }
 
     // =========================================================================
@@ -150,7 +183,6 @@ class POSTransactionViewModel(
 
     fun updateCashAmount(amount: Double) {
         _cashAmount.value = amount
-        recalculateChange()
     }
 
     fun updatePaymentMethod(method: PaymentMethod) {
@@ -162,24 +194,8 @@ class POSTransactionViewModel(
         _customerPhone.value = phone
     }
 
-    fun updateCashierName(name: String) {
-        _cashierName.value = name
-    }
-
     fun resetCheckoutResult() {
         _checkoutResult.value = CheckoutResult.Idle
-    }
-
-    private fun recalculateTotals() {
-        val total = _cartItems.value.sumOf { it.subTotal }
-        _totalAmount.value = total
-        recalculateChange()
-    }
-
-    private fun recalculateChange() {
-        val total = _totalAmount.value
-        val cash = _cashAmount.value
-        _changeAmount.value = if (cash >= total) cash - total else 0.0
     }
 
     // =========================================================================
@@ -199,7 +215,7 @@ class POSTransactionViewModel(
             return
         }
 
-        val total = _totalAmount.value
+        val total = totalAmount.value
         val paymentMethod = _selectedPaymentMethod.value
 
         // Validasi Pembayaran
@@ -232,7 +248,7 @@ class POSTransactionViewModel(
                 paymentMethod = paymentMethod.name,
                 cashAmount = if (paymentMethod == PaymentMethod.TUNAI) _cashAmount.value else total,
                 changeAmount = calculatedChange,
-                cashierName = _cashierName.value.ifBlank { "Kasir" }
+                cashierName = settingsManager.cashierName.value.ifBlank { "Kasir" }
             )
 
             // 2. Transaction Detail Entities

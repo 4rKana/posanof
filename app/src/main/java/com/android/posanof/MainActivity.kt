@@ -19,6 +19,8 @@ import com.android.posanof.ui.transaction.POSTransactionViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+import com.android.posanof.data.local.SettingsManager
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,6 +30,7 @@ class MainActivity : ComponentActivity() {
         // 1. Inisialisasi Database, Auth, dan Repositories
         val database = AppDatabase.getInstance(this)
         val authManager = AuthManager.getInstance(this)
+        val settingsManager = SettingsManager.getInstance(this)
 
         val productRepository = ProductRepository(database.productDao())
         val transactionRepository = TransactionRepository(database)
@@ -43,18 +46,37 @@ class MainActivity : ComponentActivity() {
         }
 
         // 3. Inisialisasi ViewModels
-        val posViewModel = POSTransactionViewModel(transactionRepository)
-        val creditViewModel = CreditViewModel(creditRepository)
+        val factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                if (modelClass.isAssignableFrom(POSTransactionViewModel::class.java)) {
+                    return POSTransactionViewModel(transactionRepository, settingsManager) as T
+                }
+                if (modelClass.isAssignableFrom(CreditViewModel::class.java)) {
+                    return CreditViewModel(creditRepository) as T
+                }
+                if (modelClass.isAssignableFrom(com.android.posanof.ui.report.DashboardViewModel::class.java)) {
+                    return com.android.posanof.ui.report.DashboardViewModel(transactionRepository, productRepository) as T
+                }
+                throw IllegalArgumentException("Unknown ViewModel class")
+            }
+        }
+        val provider = androidx.lifecycle.ViewModelProvider(this, factory)
+        val posViewModel = provider.get(POSTransactionViewModel::class.java)
+        val creditViewModel = provider.get(CreditViewModel::class.java)
+        val dashboardViewModel = provider.get(com.android.posanof.ui.report.DashboardViewModel::class.java)
 
         setContent {
             PosanofTheme {
                 MainAppNavigation(
                     posViewModel = posViewModel,
                     creditViewModel = creditViewModel,
+                    dashboardViewModel = dashboardViewModel,
                     productRepository = productRepository,
                     transactionRepository = transactionRepository,
                     backupRepository = backupRepository,
-                    authManager = authManager
+                    authManager = authManager,
+                    settingsManager = settingsManager
                 )
             }
         }

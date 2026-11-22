@@ -3,6 +3,7 @@ package com.android.posanof.data.repository
 import androidx.room.withTransaction
 import com.android.posanof.data.local.database.AppDatabase
 import com.android.posanof.data.local.entity.CreditEntity
+import com.android.posanof.data.local.entity.CreditHistoryEntity
 import com.android.posanof.data.local.entity.TransactionDetailEntity
 import com.android.posanof.data.local.entity.TransactionEntity
 import com.android.posanof.data.local.relation.TransactionWithDetails
@@ -19,6 +20,12 @@ class TransactionRepository(private val database: AppDatabase) {
 
     fun getAllTransactionsWithDetails(): Flow<List<TransactionWithDetails>> =
         transactionDao.getAllTransactionsWithDetails()
+
+    fun getTransactionsByDateRange(startTimestamp: Long, endTimestamp: Long): Flow<List<TransactionWithDetails>> =
+        transactionDao.getTransactionsByDateRange(startTimestamp, endTimestamp)
+
+    fun getTopProducts(startTimestamp: Long, endTimestamp: Long): Flow<List<com.android.posanof.data.local.entity.TopProductSales>> =
+        transactionDao.getTopProducts(startTimestamp, endTimestamp)
 
     /**
      * Menyimpan transaksi penjualan beserta rinciannya, mengurangi stok produk,
@@ -50,7 +57,14 @@ class TransactionRepository(private val database: AppDatabase) {
                 // 4. Jika metode KASBON, simpan record piutang pada tabel credit
                 if (credit != null) {
                     val updatedCredit = credit.copy(transactionId = transactionId)
-                    creditDao.insertCredit(updatedCredit)
+                    val creditId = creditDao.insertCredit(updatedCredit)
+                    creditDao.insertCreditHistory(
+                        CreditHistoryEntity(
+                            creditId = creditId.toInt(),
+                            type = "DEBIT",
+                            amount = updatedCredit.remainingDebt
+                        )
+                    )
                 }
 
                 Result.success(transactionId)

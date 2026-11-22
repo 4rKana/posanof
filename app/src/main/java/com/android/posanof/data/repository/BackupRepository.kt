@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.room.withTransaction
 import com.android.posanof.data.local.database.AppDatabase
 import com.android.posanof.data.local.entity.CreditEntity
+import com.android.posanof.data.local.entity.CreditHistoryEntity
 import com.android.posanof.data.local.entity.ProductEntity
 import com.android.posanof.data.local.entity.TransactionDetailEntity
 import com.android.posanof.data.local.entity.TransactionEntity
@@ -48,12 +49,13 @@ class BackupRepository(
     suspend fun exportBackup(
         destinationUri: Uri,
         secretPassphrase: String = DEFAULT_PASSPHRASE
-    ): Result<BackupSummary> {
-        return try {
+    ): Result<BackupSummary> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
             val products = productDao.getAllProductsList()
             val transactions = transactionDao.getAllTransactionsList()
             val details = transactionDao.getAllTransactionDetailsList()
             val credits = creditDao.getAllCreditsList()
+            val creditHistories = creditDao.getAllCreditHistoriesList()
 
             // 1. Buat struktur JSON
             val rootJson = JSONObject().apply {
@@ -71,6 +73,7 @@ class BackupRepository(
                             put("barcode", p.barcode ?: JSONObject.NULL)
                             put("min_stock", p.minStock)
                             put("created_at", p.createdAt)
+                            put("category", p.category)
                         })
                     }
                 })
@@ -115,6 +118,18 @@ class BackupRepository(
                         })
                     }
                 })
+
+                put("credit_histories", JSONArray().apply {
+                    creditHistories.forEach { ch ->
+                        put(JSONObject().apply {
+                            put("id", ch.id)
+                            put("credit_id", ch.creditId)
+                            put("type", ch.type)
+                            put("amount", ch.amount)
+                            put("created_at", ch.createdAt)
+                        })
+                    }
+                })
             }
 
             val jsonBytes = rootJson.toString().toByteArray(Charsets.UTF_8)
@@ -148,8 +163,8 @@ class BackupRepository(
     suspend fun importRestore(
         sourceUri: Uri,
         secretPassphrase: String = DEFAULT_PASSPHRASE
-    ): Result<BackupSummary> {
-        return try {
+    ): Result<BackupSummary> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
             // 1. Baca seluruh byte file backup
             val encryptedBytes = context.contentResolver.openInputStream(sourceUri)?.use { inputStream: InputStream ->
                 inputStream.readBytes()
@@ -188,7 +203,8 @@ class BackupRepository(
                         stock = obj.getInt("stock"),
                         barcode = if (obj.isNull("barcode")) null else obj.getString("barcode"),
                         minStock = obj.optInt("min_stock", 0),
-                        createdAt = obj.optLong("created_at", System.currentTimeMillis())
+                        createdAt = obj.optLong("created_at", System.currentTimeMillis()),
+                        category = obj.optString("category", "")
                     )
                 )
             }
@@ -246,8 +262,27 @@ class BackupRepository(
                 )
             }
 
+            // Extract Credit Histories
+            val creditHistoriesList = mutableListOf<CreditHistoryEntity>()
+            val creditHistoriesArray = rootJson.optJSONArray("credit_histories")
+            if (creditHistoriesArray != null) {
+                for (i in 0 until creditHistoriesArray.length()) {
+                    val obj = creditHistoriesArray.getJSONObject(i)
+                    creditHistoriesList.add(
+                        CreditHistoryEntity(
+                            id = obj.getInt("id"),
+                            creditId = obj.getInt("credit_id"),
+                            type = obj.getString("type"),
+                            amount = obj.getDouble("amount"),
+                            createdAt = obj.optLong("created_at", System.currentTimeMillis())
+                        )
+                    )
+                }
+            }
+
             // 4. Overwrite Atomik ke Room Database (@Transaction)
             database.withTransaction {
+                creditDao.deleteAllCreditHistories()
                 transactionDao.deleteAllTransactionDetails()
                 creditDao.deleteAllCredits()
                 transactionDao.deleteAllTransactions()
@@ -257,6 +292,7 @@ class BackupRepository(
                 transactionDao.insertTransactions(transactionsList)
                 transactionDao.insertTransactionDetails(detailsList)
                 creditDao.insertCredits(creditsList)
+                creditDao.insertCreditHistories(creditHistoriesList)
             }
 
             val summary = BackupSummary(
@@ -320,7 +356,7 @@ class BackupRepository(
 
     companion object {
         private const val APP_IDENTIFIER = "posanof"
-        private const val BACKUP_VERSION = 1
+        private const val BACKUP_VERSION = 2
         private const val DEFAULT_PASSPHRASE = "POSANOF_OFFLINE_SECURE_BACKUP_2026"
 
         private const val SALT_SIZE_BYTES = 16

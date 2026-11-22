@@ -79,42 +79,19 @@ fun CreditManagementScreen(
     viewModel: CreditViewModel,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-
     val credits by viewModel.unpaidCredits.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    val paymentResult by viewModel.paymentResult.collectAsState()
 
-    var selectedCredit by remember { mutableStateOf<CreditEntity?>(null) }
+    var selectedCreditId by remember { mutableStateOf<Int?>(null) }
     var selectedTab by remember { mutableStateOf(CreditFilterTab.SEMUA) }
 
-    when (val result = paymentResult) {
-        is PaymentResult.Success -> {
-            LaunchedEffect(result) {
-                val statusText = if (result.isFullyPaid) "LUNAS!" else "Sebagian terbayar"
-                Toast.makeText(
-                    context,
-                    "Pembayaran Kasbon ${result.customerName} berhasil ($statusText)",
-                    Toast.LENGTH_LONG
-                ).show()
-                viewModel.resetPaymentResult()
-                selectedCredit = null
-            }
-        }
-        is PaymentResult.Error -> {
-            LaunchedEffect(result) {
-                Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
-                viewModel.resetPaymentResult()
-            }
-        }
-        else -> Unit
-    }
+    val selectedCredit = remember(selectedCreditId, credits) { credits.find { it.id == selectedCreditId } }
 
     selectedCredit?.let { credit ->
         CreditDetailScreen(
             credit = credit,
             viewModel = viewModel,
-            onBackClick = { selectedCredit = null },
+            onBackClick = { selectedCreditId = null },
             modifier = modifier
         )
     } ?: KasbonListContent(
@@ -123,7 +100,7 @@ fun CreditManagementScreen(
         selectedTab = selectedTab,
         onTabSelected = { selectedTab = it },
         onSearchChange = viewModel::setSearchQuery,
-        onCreditClick = { selectedCredit = it },
+        onCreditClick = { selectedCreditId = it.id },
         modifier = modifier
     )
 }
@@ -154,7 +131,7 @@ fun KasbonListContent(
 
     val total = remember(credits) { credits.sumOf { it.remainingDebt } }
     val customerCount = remember(credits) {
-        credits.map { it.customerName.trim().lowercase() }.distinct().size
+        credits.filter { it.remainingDebt > 0.0 && !it.status.equals("LUNAS", ignoreCase = true) }.map { it.customerName.trim().lowercase() }.distinct().size
     }
     val isSearching = searchQuery.isNotBlank()
 

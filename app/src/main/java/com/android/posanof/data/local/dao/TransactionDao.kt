@@ -57,4 +57,20 @@ interface TransactionDao {
     @Transaction
     @Query("SELECT * FROM `transaction` ORDER BY date DESC")
     fun getAllTransactionsWithDetails(): Flow<List<TransactionWithDetails>>
+
+    @Transaction
+    @Query("SELECT * FROM `transaction` WHERE date >= :startTimestamp AND date <= :endTimestamp ORDER BY date DESC")
+    fun getTransactionsByDateRange(startTimestamp: Long, endTimestamp: Long): Flow<List<TransactionWithDetails>>
+
+    @Query("""
+        SELECT p.id, p.name, SUM(d.quantity) as totalQty 
+        FROM product p 
+        INNER JOIN transaction_detail d ON p.id = d.product_id 
+        INNER JOIN `transaction` t ON t.id = d.transaction_id 
+        WHERE t.date >= :startTimestamp AND t.date <= :endTimestamp 
+        GROUP BY p.id, p.name 
+        ORDER BY totalQty DESC 
+        LIMIT 3
+    """)
+    fun getTopProducts(startTimestamp: Long, endTimestamp: Long): Flow<List<com.android.posanof.data.local.entity.TopProductSales>>
 }

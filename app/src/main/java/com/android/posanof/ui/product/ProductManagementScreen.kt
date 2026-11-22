@@ -1,72 +1,44 @@
 package com.android.posanof.ui.product
 
 import android.widget.Toast
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.android.posanof.data.local.entity.ProductEntity
 import com.android.posanof.data.repository.ProductRepository
+import com.android.posanof.ui.components.*
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
 
-/** Pilihan jenis barang di form produk. Ubah/tambah sesuai kebutuhan toko. */
-private val ProductCategoryOptions = listOf("Minuman", "Makanan", "Sembako", "Lainnya")
+import com.android.posanof.data.local.SettingsManager
 
-/**
- * Layar Master Data Produk (Tambah, Edit, Hapus, Monitoring Stok).
- */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProductManagementScreen(
     productRepository: ProductRepository,
+    settingsManager: SettingsManager,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -90,87 +62,11 @@ fun ProductManagementScreen(
             }
         }
     }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Master Data Produk", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    selectedProductForEdit = null
-                    showAddEditDialog = true
-                }
-            ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Tambah Produk")
-            }
-        },
-        modifier = modifier.fillMaxSize()
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp)
-        ) {
-            // Field Pencarian Produk
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                label = { Text("Cari produk atau barcode...") },
-                leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (filteredProducts.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (allProducts.isEmpty()) "Belum ada produk. Tekan tombol + untuk menambah." else "Produk tidak ditemukan.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
-                    items(
-                        items = filteredProducts,
-                        key = { it.id }
-                    ) { product ->
-                        ProductItemRow(
-                            product = product,
-                            currencyFormat = currencyFormat,
-                            onEdit = {
-                                selectedProductForEdit = product
-                                showAddEditDialog = true
-                            },
-                            onDelete = { productToDelete = product }
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    // Modal Add / Edit Product Dialog
+    
     if (showAddEditDialog) {
-        AddEditProductDialog(
+        AddEditProductScreen(
             product = selectedProductForEdit,
+            settingsManager = settingsManager,
             onSave = { name, price, stock, minStock, barcode, category ->
                 coroutineScope.launch {
                     if (selectedProductForEdit == null) {
@@ -179,7 +75,7 @@ fun ProductManagementScreen(
                             price = price,
                             stock = stock,
                             minStock = minStock,
-                            barcode = barcode.ifBlank { null },
+                            barcode = if (barcode.isBlank()) null else barcode,
                             category = category
                         )
                         val result = productRepository.insertProduct(newProduct)
@@ -197,7 +93,7 @@ fun ProductManagementScreen(
                             price = price,
                             stock = stock,
                             minStock = minStock,
-                            barcode = barcode.ifBlank { null },
+                            barcode = if (barcode.isBlank()) null else barcode,
                             category = category
                         )
                         val result = productRepository.updateProduct(updatedProduct)
@@ -214,27 +110,122 @@ fun ProductManagementScreen(
                     selectedProductForEdit = null
                 }
             },
+            onDelete = {
+                productToDelete = selectedProductForEdit
+            },
             onDismiss = {
                 showAddEditDialog = false
                 selectedProductForEdit = null
             }
         )
-    }
+    } else {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(PosBackground)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Master Data",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = PosInk,
+                    modifier = Modifier.weight(1f)
+                )
+                PosBadge(text = "Admin", bg = Color(0xFFE0F2F1), fg = Color(0xFF00796B))
+            }
 
+            // Search Bar (rounded, white)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Search, null, tint = PosMuted, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 14.sp, color = PosInk),
+                    cursorBrush = SolidColor(PosPrimary),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (searchQuery.isEmpty()) {
+                                Text("Cari produk atau barcode", color = PosMuted, fontSize = 14.sp)
+                            }
+                            inner()
+                        }
+                    }
+                )
+                if (searchQuery.isNotEmpty()) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Hapus",
+                        tint = PosMuted,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable { searchQuery = "" }
+                    )
+                }
+            }
+            
+            // List
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredProducts, key = { it.id }) { product ->
+                    ProductItemRow(
+                        product = product,
+                        currencyFormat = currencyFormat,
+                        onEdit = {
+                            selectedProductForEdit = product
+                            showAddEditDialog = true
+                        }
+                    )
+                }
+            }
+            
+            Box(Modifier.padding(16.dp)) {
+                PosPrimaryButton(
+                    text = "+ Tambah Produk",
+                    onClick = {
+                        selectedProductForEdit = null
+                        showAddEditDialog = true
+                    }
+                )
+            }
+        }
+    }
+    
     // Modal Konfirmasi Delete
     productToDelete?.let { product ->
         AlertDialog(
             onDismissRequest = { productToDelete = null },
-            title = { Text("Hapus Produk") },
+            title = { Text("Hapus Produk", fontWeight = FontWeight.Bold) },
             text = { Text("Apakah Anda yakin ingin menghapus produk '${product.name}'?") },
             confirmButton = {
-                Button(
+                TextButton(
                     onClick = {
                         coroutineScope.launch {
                             val result = productRepository.deleteProduct(product)
                             result.fold(
                                 onSuccess = {
                                     Toast.makeText(context, "Produk terhapus", Toast.LENGTH_SHORT).show()
+                                    showAddEditDialog = false
                                 },
                                 onFailure = { err ->
                                     val msg = if (err is android.database.sqlite.SQLiteConstraintException) {
@@ -249,12 +240,12 @@ fun ProductManagementScreen(
                         }
                     }
                 ) {
-                    Text("Hapus")
+                    Text("Hapus", color = PosDanger)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { productToDelete = null }) {
-                    Text("Batal")
+                    Text("Batal", color = PosMuted)
                 }
             }
         )
@@ -265,13 +256,15 @@ fun ProductManagementScreen(
 private fun ProductItemRow(
     product: ProductEntity,
     currencyFormat: NumberFormat,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onEdit: () -> Unit
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    val isLowStock = product.stock <= product.minStock
+    val bgColor = if (isLowStock) PosWarnBg else Color.White
+    val borderColor = if (isLowStock) Color(0xFFFFD54F) else PosBorder
+    val stockTextColor = if (isLowStock) PosWarnText else PosMuted
+    val stockText = if (isLowStock) "Stok ${product.stock} · menipis" else "Stok ${product.stock}"
+
+    PosCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit), color = bgColor) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -280,167 +273,50 @@ private fun ProductItemRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = product.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                if (product.category.isNotBlank()) {
+                Text(
+                    text = product.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = PosInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = product.category,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        text = currencyFormat.format(product.price).removePrefix("Rp").replace(",00", ""),
+                        fontSize = 12.sp,
+                        color = PosInk,
+                        fontWeight = FontWeight.Medium
                     )
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Harga: ${currencyFormat.format(product.price)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "Stok: ${product.stock} (Min. Stok: ${product.minStock})",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (product.stock <= product.minStock) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (!product.barcode.isNullOrEmpty()) {
                     Text(
-                        text = "Barcode: ${product.barcode}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = " · ",
+                        fontSize = 12.sp,
+                        color = PosMuted
+                    )
+                    Text(
+                        text = stockText,
+                        fontSize = 12.sp,
+                        color = stockTextColor,
+                        fontWeight = if (isLowStock) FontWeight.SemiBold else FontWeight.Normal
                     )
                 }
             }
 
-            Row {
-                IconButton(onClick = onEdit) {
-                    Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit")
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(imageVector = Icons.Default.Delete, contentDescription = "Hapus", tint = MaterialTheme.colorScheme.error)
+            Surface(
+                shape = CircleShape,
+                color = PosSoft,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit",
+                        tint = PosPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddEditProductDialog(
-    product: ProductEntity?,
-    onSave: (name: String, price: Double, stock: Int, minStock: Int, barcode: String, category: String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var nameInput by remember { mutableStateOf(product?.name.orEmpty()) }
-    var priceInput by remember { mutableStateOf(product?.price?.toLong()?.toString().orEmpty()) }
-    var stockInput by remember { mutableStateOf(product?.stock?.toString().orEmpty()) }
-    var minStockInput by remember { mutableStateOf(product?.minStock?.toString() ?: "5") }
-    var barcodeInput by remember { mutableStateOf(product?.barcode.orEmpty()) }
-    var categoryInput by remember { mutableStateOf(product?.category.orEmpty()) }
-
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (product == null) "Tambah Produk Baru" else "Edit Produk", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                OutlinedTextField(
-                    value = nameInput,
-                    onValueChange = { nameInput = it },
-                    label = { Text("Nama Produk *") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Jenis barang: tap lagi untuk membatalkan pilihan
-                Text("Jenis Barang", style = MaterialTheme.typography.labelMedium)
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ProductCategoryOptions.forEach { option ->
-                        FilterChip(
-                            selected = categoryInput == option,
-                            onClick = { categoryInput = if (categoryInput == option) "" else option },
-                            label = { Text(option) }
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = priceInput,
-                    onValueChange = { priceInput = it },
-                    label = { Text("Harga (Rp) *") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = stockInput,
-                        onValueChange = { stockInput = it },
-                        label = { Text("Stok *") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = minStockInput,
-                        onValueChange = { minStockInput = it },
-                        label = { Text("Min. Stok") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = barcodeInput,
-                    onValueChange = { barcodeInput = it },
-                    label = { Text("Kode Barcode (Opsional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (errorMessage != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val price = priceInput.toDoubleOrNull() ?: 0.0
-                    val stock = stockInput.toIntOrNull() ?: -1
-                    val minStock = minStockInput.toIntOrNull() ?: 0
-
-                    if (nameInput.isBlank()) {
-                        errorMessage = "Nama produk wajib diisi."
-                    } else if (price <= 0) {
-                        errorMessage = "Harga harus lebih dari 0."
-                    } else if (stock < 0) {
-                        errorMessage = "Stok harus diisi angka valid."
-                    } else {
-                        onSave(nameInput.trim(), price, stock, minStock, barcodeInput.trim(), categoryInput)
-                    }
-                }
-            ) {
-                Text("Simpan")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Batal")
-            }
-        }
-    )
 }

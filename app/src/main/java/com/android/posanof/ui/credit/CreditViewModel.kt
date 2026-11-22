@@ -3,6 +3,7 @@ package com.android.posanof.ui.credit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.posanof.data.local.entity.CreditEntity
+import com.android.posanof.data.local.entity.CreditHistoryEntity
 import com.android.posanof.data.repository.CreditRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -61,6 +62,8 @@ class CreditViewModel(
     private val _paymentResult = MutableStateFlow<PaymentResult>(PaymentResult.Idle)
     val paymentResult: StateFlow<PaymentResult> = _paymentResult.asStateFlow()
 
+    fun getCreditHistories(creditId: Int) = creditRepository.getCreditHistoriesByCreditId(creditId)
+
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
     }
@@ -116,7 +119,15 @@ class CreditViewModel(
                     status = newStatus
                 )
 
+                androidx.room.RoomDatabase::class // just to let repository do transaction or we can just call repo methods in sequence (repo updateCredit and insertCreditHistory)
                 creditRepository.updateCredit(updatedCredit)
+                creditRepository.insertCreditHistory(
+                    CreditHistoryEntity(
+                        creditId = creditId.toInt(),
+                        type = "PAYMENT",
+                        amount = paymentAmount
+                    )
+                )
 
                 _paymentResult.value = PaymentResult.Success(
                     customerName = credit.customerName,

@@ -37,6 +37,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import com.android.posanof.data.local.SettingsManager
+import com.android.posanof.util.ReportExporter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,12 +82,17 @@ import com.android.posanof.ui.components.toRupiah
 @Composable
 fun CartRoute(
     viewModel: POSTransactionViewModel,
+    settingsManager: SettingsManager,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     val items by viewModel.cartItems.collectAsState()
+    val subtotal by viewModel.subtotal.collectAsState()
+    val discountAmount by viewModel.discountAmount.collectAsState()
+    val taxAmount by viewModel.taxAmount.collectAsState()
     val total by viewModel.totalAmount.collectAsState()
     val cashAmount by viewModel.cashAmount.collectAsState()
     val changeAmount by viewModel.changeAmount.collectAsState()
@@ -97,6 +110,8 @@ fun CartRoute(
     var snapPhone by rememberSaveable { mutableStateOf("") }
     var snapTime by rememberSaveable { mutableStateOf(0L) }
     var snapItems by rememberSaveable { mutableStateOf("") }
+    
+    val storeName by settingsManager.storeName.collectAsState()
 
     val result = checkoutResult
     if (result is CheckoutResult.Success) {
@@ -118,6 +133,31 @@ fun CartRoute(
             if (snapName.isNotBlank()) rows.add("Pelanggan" to snapName)
             rows.add("Nominal hutang" to snapTotal.toLong().toRupiah())
         }
+        
+        val createPdfLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.CreateDocument("application/pdf")
+        ) { uri ->
+            uri?.let {
+                coroutineScope.launch {
+                    try {
+                        context.contentResolver.openOutputStream(it)?.use { stream ->
+                            withContext(Dispatchers.IO) {
+                                ReportExporter.exportReceiptToPdf(
+                                    outputStream = stream,
+                                    storeName = storeName,
+                                    rows = rows,
+                                    items = snapItems,
+                                    total = snapTotal.toLong().toRupiah()
+                                )
+                            }
+                        }
+                        Toast.makeText(context, "Struk PDF berhasil disimpan!", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Gagal ekspor PDF: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
 
         TransactionSuccessScreen(
             total = snapTotal.toLong(),
@@ -128,7 +168,8 @@ fun CartRoute(
                 shareReceiptToWhatsApp(context, snapPhone, text)
             },
             onSavePdf = {
-                Toast.makeText(context, "Simpan PDF: segera hadir", Toast.LENGTH_SHORT).show()
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                createPdfLauncher.launch("Struk_${result.transactionId}_$timestamp.pdf")
             },
             onNewTransaction = finish,
             modifier = modifier
@@ -136,6 +177,9 @@ fun CartRoute(
     } else {
         CartScreen(
             items = items,
+            subtotal = subtotal,
+            discountAmount = discountAmount,
+            taxAmount = taxAmount,
             total = total,
             cashAmount = cashAmount,
             changeAmount = changeAmount,
@@ -182,6 +226,9 @@ private fun formatReceiptDate(millis: Long): String =
 @Composable
 fun CartScreen(
     items: List<CartItem>,
+    subtotal: Double,
+    discountAmount: Double,
+    taxAmount: Double,
     total: Double,
     cashAmount: Double,
     changeAmount: Double,
@@ -251,9 +298,9 @@ fun CartScreen(
 
                     PosCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SummaryRow("Subtotal", totalLong.toRupiah())
-                            SummaryRow("Diskon", "Rp 0")
-                            SummaryRow("Pajak", "Rp 0")
+                            SummaryRow("Subtotal", subtotal.toLong().toRupiah())
+                            SummaryRow("Diskon", discountAmount.toLong().toRupiah())
+                            SummaryRow("Pajak", taxAmount.toLong().toRupiah())
                             HorizontalDivider(color = PosBorder, modifier = Modifier.padding(vertical = 4.dp))
                             SummaryRow("Total", totalLong.toRupiah(), bold = true)
                         }
@@ -510,6 +557,9 @@ private fun CartScreenPreview() {
 
     CartScreen(
         items = items,
+        subtotal = total,
+        discountAmount = 0.0,
+        taxAmount = 0.0,
         total = total,
         cashAmount = cash,
         changeAmount = if (cash >= total) cash - total else 0.0,

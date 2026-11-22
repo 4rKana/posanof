@@ -73,12 +73,8 @@ fun CreditDetailScreen(
 ) {
     val context = LocalContext.current
     val paymentResult by viewModel.paymentResult.collectAsState()
-    var input by remember { mutableStateOf("") }
-
+    val histories by viewModel.getCreditHistories(credit.id).collectAsState(initial = emptyList())
     var rawInput by remember { mutableStateOf("") }
-    val displayInput = remember(rawInput) {
-        if (rawInput.isBlank()) "" else rawInput.toLongOrNull()?.toRupiah() ?: rawInput
-    }
 
     val remaining = credit.remainingDebt
     val amount = rawInput.toDoubleOrNull() ?: 0.0
@@ -86,22 +82,19 @@ fun CreditDetailScreen(
     val canSubmit = amount > 0.0 && amount <= remaining && paymentResult !is PaymentResult.Loading
     val isPaidOff = remaining <= 0.0 || credit.status.equals("LUNAS", ignoreCase = true)
 
-    // Handle Toast Hasil Pembayaran
-    when (val result = paymentResult) {
-        is PaymentResult.Success -> {
-            LaunchedEffect(result) {
+    LaunchedEffect(paymentResult) {
+        when (val result = paymentResult) {
+            is PaymentResult.Success -> {
                 Toast.makeText(context, "Pembayaran berhasil dicatat!", Toast.LENGTH_SHORT).show()
+                rawInput = ""
                 viewModel.resetPaymentResult()
-                input = ""
             }
-        }
-        is PaymentResult.Error -> {
-            LaunchedEffect(result) {
+            is PaymentResult.Error -> {
                 Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
                 viewModel.resetPaymentResult()
             }
+            else -> Unit
         }
-        else -> Unit
     }
 
     Column(
@@ -168,12 +161,26 @@ fun CreditDetailScreen(
             Spacer(Modifier.height(10.dp))
 
             // ---- Riwayat Transaksi / Kasbon ----
-            HistoryItem(
-                title = "Kasbon baru",
-                date = formatKasbonDate(credit.createdAt),
-                amount = "+ " + credit.remainingDebt.toLong().toRupiah(),
-                isDebit = true
-            )
+            if (histories.isEmpty()) {
+                HistoryItem(
+                    title = "Kasbon baru",
+                    date = formatKasbonDate(credit.createdAt),
+                    amount = "+ " + credit.remainingDebt.toLong().toRupiah(),
+                    isDebit = true
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    histories.forEach { history ->
+                        val isDebit = history.type == "DEBIT"
+                        HistoryItem(
+                            title = if (isDebit) "Kasbon baru" else "Pembayaran diterima",
+                            date = formatKasbonDate(history.createdAt),
+                            amount = (if (isDebit) "+ " else "- ") + history.amount.toLong().toRupiah(),
+                            isDebit = isDebit
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(20.dp))
 
@@ -211,7 +218,7 @@ fun CreditDetailScreen(
                 Spacer(Modifier.height(4.dp))
 
                 TextButton(
-                    onClick = { input = remaining.toLong().toString() },
+                    onClick = { rawInput = remaining.toLong().toString() },
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text("Lunasi (${remaining.toLong().toRupiah()})", color = PosPrimary)
@@ -258,7 +265,11 @@ fun CreditDetailScreen(
                         val formattedPhone = if (phone.startsWith("0")) "62" + phone.drop(1) else phone
                         val message = "Halo ${credit.customerName}, mengingatkan sisa kasbon Anda sebesar ${remaining.toLong().toRupiah()}. Terima kasih."
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$formattedPhone?text=${Uri.encode(message)}"))
-                        context.startActivity(intent)
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            Toast.makeText(context, "Aplikasi WhatsApp tidak ditemukan.", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             ) {

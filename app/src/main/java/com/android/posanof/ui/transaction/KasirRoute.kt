@@ -31,10 +31,13 @@ import com.android.posanof.ui.transaction.scanner.POSScannerScreen
  * Penghubung antara tampilan baru (KasirScreen) dan data asli
  * (POSTransactionViewModel + ProductRepository).
  */
+import com.android.posanof.data.local.SettingsManager
+
 @Composable
 fun KasirRoute(
     viewModel: POSTransactionViewModel,
     productRepository: ProductRepository,
+    settingsManager: SettingsManager,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -78,6 +81,7 @@ fun KasirRoute(
         BackHandler { showCart = false }
         CartRoute(
             viewModel = viewModel,
+            settingsManager = settingsManager,
             onBack = { showCart = false },
             modifier = modifier
         )
