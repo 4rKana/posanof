@@ -10,6 +10,7 @@ import com.android.posanof.data.local.dao.CreditDao
 import com.android.posanof.data.local.dao.ProductDao
 import com.android.posanof.data.local.dao.TransactionDao
 import com.android.posanof.data.local.entity.CreditEntity
+import com.android.posanof.data.local.entity.CreditHistoryEntity
 import com.android.posanof.data.local.entity.ProductEntity
 import com.android.posanof.data.local.entity.TransactionDetailEntity
 import com.android.posanof.data.local.entity.TransactionEntity
@@ -19,9 +20,10 @@ import com.android.posanof.data.local.entity.TransactionEntity
         ProductEntity::class,
         TransactionEntity::class,
         TransactionDetailEntity::class,
-        CreditEntity::class
+        CreditEntity::class,
+        CreditHistoryEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -43,6 +45,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `credit_history` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, 
+                        `credit_id` INTEGER NOT NULL, 
+                        `type` TEXT NOT NULL, 
+                        `amount` REAL NOT NULL, 
+                        `created_at` INTEGER NOT NULL, 
+                        FOREIGN KEY(`credit_id`) REFERENCES `credit`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_credit_history_credit_id` ON `credit_history` (`credit_id`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -50,7 +68,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "posanof_database"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                 INSTANCE = instance
                 instance

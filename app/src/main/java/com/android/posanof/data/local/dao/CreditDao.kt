@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.android.posanof.data.local.entity.CreditEntity
+import com.android.posanof.data.local.entity.CreditHistoryEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -43,4 +44,19 @@ interface CreditDao {
 
     @Query("SELECT * FROM credit WHERE transaction_id = :transactionId LIMIT 1")
     fun getCreditByTransactionId(transactionId: Int): Flow<CreditEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertCreditHistory(history: CreditHistoryEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertCreditHistories(histories: List<CreditHistoryEntity>)
+
+    @Query("SELECT * FROM credit_history WHERE credit_id = :creditId ORDER BY created_at ASC")
+    fun getCreditHistoriesByCreditId(creditId: Int): Flow<List<CreditHistoryEntity>>
+
+    @Query("SELECT * FROM credit_history")
+    suspend fun getAllCreditHistoriesList(): List<CreditHistoryEntity>
+
+    @Query("DELETE FROM credit_history")
+    suspend fun deleteAllCreditHistories()
 }

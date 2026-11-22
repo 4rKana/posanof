@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +25,21 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.android.posanof.scanner.BarcodeScannerAnalyzer
 import java.util.concurrent.Executors
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 
 /**
  * Komponen Compose CameraX Preview untuk pemindaian Barcode.
@@ -36,6 +53,7 @@ fun CameraScannerView(
     showFrame: Boolean = true,
     onBarcodeScanned: (String) -> Unit
 ) {
+    val currentOnBarcodeScanned by rememberUpdatedState(onBarcodeScanned)
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -43,9 +61,13 @@ fun CameraScannerView(
 
     DisposableEffect(Unit) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        var boundCameraProvider: ProcessCameraProvider? = null
+        var analyzer: BarcodeScannerAnalyzer? = null
 
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
+            boundCameraProvider = cameraProvider
+            analyzer = BarcodeScannerAnalyzer(onBarcodeDetected = { currentOnBarcodeScanned(it) })
 
             val preview = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
@@ -57,7 +79,7 @@ fun CameraScannerView(
                 .also { analysis ->
                     analysis.setAnalyzer(
                         cameraExecutor,
-                        BarcodeScannerAnalyzer(onBarcodeDetected = onBarcodeScanned)
+                        analyzer!!
                     )
                 }
 
@@ -83,6 +105,8 @@ fun CameraScannerView(
         }, ContextCompat.getMainExecutor(context))
 
         onDispose {
+            boundCameraProvider?.unbindAll()
+            analyzer?.close()
             cameraExecutor.shutdown()
         }
     }
@@ -105,6 +129,61 @@ fun CameraScannerView(
                         shape = RoundedCornerShape(12.dp)
                     )
             )
+        }
+    }
+}
+
+@Composable
+fun BarcodeScannerOverlay(
+    title: String = "Pindai Barcode",
+    onBarcodeScanned: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasPermission = isGranted
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    BackHandler(onBack = onBack)
+
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        PosTopBar(
+            title = title,
+            onBack = onBack,
+            dark = true
+        )
+        if (hasPermission) {
+            CameraScannerView(
+                modifier = Modifier.weight(1f),
+                onBarcodeScanned = onBarcodeScanned
+            )
+        } else {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Izin kamera diperlukan untuk memindai barcode", color = Color.White)
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                        Text("Berikan Izin Kamera")
+                    }
+                }
+            }
         }
     }
 }

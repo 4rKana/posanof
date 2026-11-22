@@ -80,6 +80,9 @@ dependencies {
     // Navigation Compose
     implementation(libs.androidx.navigation.compose)
 
+    // ZXing Core (QR Code Generation)
+    implementation(libs.zxing.core)
+
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

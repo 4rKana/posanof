@@ -282,4 +282,98 @@ object ReportExporter {
             pdfDocument.close()
         }
     }
+
+    // =========================================================================
+    // EXPORT RECEIPT TO PDF
+    // =========================================================================
+
+    fun exportReceiptToPdf(
+        outputStream: OutputStream,
+        storeName: String,
+        rows: List<Pair<String, String>>,
+        items: String,
+        total: String
+    ) {
+        val pdfDocument = PdfDocument()
+
+        val pageWidth = 400
+        val pageHeight = 600
+        val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
+        val page = pdfDocument.startPage(pageInfo)
+        val canvas: Canvas = page.canvas
+
+        val titlePaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 20f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+
+        val bodyPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 12f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        }
+        
+        val boldPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 12f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+
+        val linePaint = Paint().apply {
+            color = Color.GRAY
+            strokeWidth = 1f
+        }
+
+        var y = 40f
+        val centerX = pageWidth / 2f
+
+        canvas.drawText(storeName, centerX, y, titlePaint)
+        y += 30f
+
+        canvas.drawLine(20f, y, (pageWidth - 20).toFloat(), y, linePaint)
+        y += 20f
+
+        for ((key, value) in rows) {
+            canvas.drawText(key, 20f, y, bodyPaint)
+            canvas.drawText(value, (pageWidth - 20).toFloat() - bodyPaint.measureText(value), y, bodyPaint)
+            y += 20f
+        }
+        
+        y += 10f
+        canvas.drawLine(20f, y, (pageWidth - 20).toFloat(), y, linePaint)
+        y += 20f
+
+        val itemLines = items.split("\n")
+        for (line in itemLines) {
+            canvas.drawText(line, 20f, y, bodyPaint)
+            y += 20f
+        }
+
+        y += 10f
+        canvas.drawLine(20f, y, (pageWidth - 20).toFloat(), y, linePaint)
+        y += 20f
+
+        canvas.drawText("Total", 20f, y, boldPaint)
+        canvas.drawText(total, (pageWidth - 20).toFloat() - boldPaint.measureText(total), y, boldPaint)
+        
+        y += 40f
+        val footerPaint = Paint().apply {
+            color = Color.DKGRAY
+            textSize = 10f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText("Terima kasih atas kunjungan Anda", centerX, y, footerPaint)
+
+        pdfDocument.finishPage(page)
+
+        try {
+            pdfDocument.writeTo(outputStream)
+            outputStream.flush()
+        } finally {
+            pdfDocument.close()
+        }
+    }
 }

@@ -1,6 +1,6 @@
 package com.android.posanof.ui.credit
 
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -79,42 +79,20 @@ fun CreditManagementScreen(
     viewModel: CreditViewModel,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-
     val credits by viewModel.unpaidCredits.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    val paymentResult by viewModel.paymentResult.collectAsState()
 
-    var selectedCredit by remember { mutableStateOf<CreditEntity?>(null) }
+    var selectedCreditId by remember { mutableStateOf<Int?>(null) }
     var selectedTab by remember { mutableStateOf(CreditFilterTab.SEMUA) }
 
-    when (val result = paymentResult) {
-        is PaymentResult.Success -> {
-            LaunchedEffect(result) {
-                val statusText = if (result.isFullyPaid) "LUNAS!" else "Sebagian terbayar"
-                Toast.makeText(
-                    context,
-                    "Pembayaran Kasbon ${result.customerName} berhasil ($statusText)",
-                    Toast.LENGTH_LONG
-                ).show()
-                viewModel.resetPaymentResult()
-                selectedCredit = null
-            }
-        }
-        is PaymentResult.Error -> {
-            LaunchedEffect(result) {
-                Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
-                viewModel.resetPaymentResult()
-            }
-        }
-        else -> Unit
-    }
+    val selectedCredit = remember(selectedCreditId, credits) { credits.find { it.id == selectedCreditId } }
 
     selectedCredit?.let { credit ->
+        BackHandler { selectedCreditId = null }
         CreditDetailScreen(
             credit = credit,
             viewModel = viewModel,
-            onBackClick = { selectedCredit = null },
+            onBackClick = { selectedCreditId = null },
             modifier = modifier
         )
     } ?: KasbonListContent(
@@ -123,7 +101,7 @@ fun CreditManagementScreen(
         selectedTab = selectedTab,
         onTabSelected = { selectedTab = it },
         onSearchChange = viewModel::setSearchQuery,
-        onCreditClick = { selectedCredit = it },
+        onCreditClick = { selectedCreditId = it.id },
         modifier = modifier
     )
 }
@@ -154,7 +132,7 @@ fun KasbonListContent(
 
     val total = remember(credits) { credits.sumOf { it.remainingDebt } }
     val customerCount = remember(credits) {
-        credits.map { it.customerName.trim().lowercase() }.distinct().size
+        credits.filter { it.remainingDebt > 0.0 && !it.status.equals("LUNAS", ignoreCase = true) }.map { it.customerName.trim().lowercase() }.distinct().size
     }
     val isSearching = searchQuery.isNotBlank()
 
@@ -385,87 +363,6 @@ private fun KasbonSearchBar(
             )
         }
     }
-}
-
-@Composable
-private fun PayDebtDialog(
-    credit: CreditEntity,
-    isProcessing: Boolean,
-    onConfirm: (Double) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var input by remember { mutableStateOf("") }
-    val remaining = credit.remainingDebt
-    val amount = input.toDoubleOrNull() ?: 0.0
-    val exceeds = amount > remaining
-    val canSubmit = amount > 0.0 && !exceeds && !isProcessing
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color.White,
-        title = { Text("Terima Pembayaran", fontWeight = FontWeight.Bold, color = PosInk) },
-        text = {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                Text(
-                    credit.customerName,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    color = PosInk
-                )
-                Text(
-                    "Kasbon sejak ${formatKasbonDate(credit.createdAt)}",
-                    fontSize = 11.sp,
-                    color = PosMuted
-                )
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(PosSoft.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Sisa hutang", Modifier.weight(1f), fontSize = 13.sp, color = PosInk)
-                    Text(
-                        remaining.toLong().toRupiah(),
-                        fontWeight = FontWeight.Bold,
-                        color = PosPrimary
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                PosTextField(
-                    label = "Nominal pembayaran",
-                    value = input,
-                    onValueChange = { input = it.filter(Char::isDigit) },
-                    placeholder = "Rp 0",
-                    keyboardType = KeyboardType.Number
-                )
-                if (exceeds) {
-                    Spacer(Modifier.height(4.dp))
-                    Text("Melebihi sisa hutang.", color = PosDanger, fontSize = 12.sp)
-                }
-                Spacer(Modifier.height(4.dp))
-                TextButton(
-                    onClick = { input = remaining.toLong().toString() },
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Lunasi (${remaining.toLong().toRupiah()})", color = PosPrimary)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(amount) }, enabled = canSubmit) {
-                Text(
-                    if (isProcessing) "Memproses..." else "Terima Pembayaran",
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (canSubmit) PosPrimary else PosMuted
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Batal", color = PosMuted) }
-        }
-    )
 }
 
 private fun maskPhone(phone: String?): String {

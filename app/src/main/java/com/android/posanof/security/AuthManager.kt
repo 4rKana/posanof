@@ -38,6 +38,14 @@ class AuthManager private constructor(context: Context) {
     }
 
     /**
+     * Mengembalikan panjang PIN yang tersimpan.
+     */
+    fun getStoredPinLength(): Int {
+        val storedPin = sharedPreferences.getString(KEY_ADMIN_PIN, null)
+        return storedPin?.length ?: 4
+    }
+
+    /**
      * Menyimpan PIN Admin baru (harus 4-6 digit angka).
      * @param pin PIN baru yang akan disimpan.
      * @return Boolean true jika PIN valid (4-6 digit angka) dan berhasil disimpan.
@@ -50,6 +58,14 @@ class AuthManager private constructor(context: Context) {
             putString(KEY_ADMIN_PIN, pin)
         }
         return true
+    }
+
+    /**
+     * Memverifikasi PIN input tanpa mengubah status sesi menjadi Admin.
+     */
+    fun verifyPinWithoutAdminElevation(inputPin: String): Boolean {
+        val storedPin = sharedPreferences.getString(KEY_ADMIN_PIN, null) ?: return false
+        return storedPin == inputPin
     }
 
     /**

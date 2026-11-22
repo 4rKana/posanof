@@ -2,6 +2,7 @@ package com.android.posanof.ui.transaction
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -10,7 +11,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
@@ -24,6 +27,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -55,7 +60,9 @@ fun KasirScreen(
     cartProductCount: Int,
     cartItemCount: Int,
     cartTotal: Long,
+    cartQuantities: Map<Long, Int>,
     onProductClick: (KasirProduct) -> Unit,
+    onDecreaseClick: (KasirProduct) -> Unit,
     onScanClick: () -> Unit,
     onCartClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -121,7 +128,13 @@ fun KasirScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(products, key = { it.id }) { p ->
-                        ProductCard(p) { onProductClick(p) }
+                        val cartQty = cartQuantities[p.id] ?: 0
+                        ProductCard(
+                            product = p,
+                            cartQty = cartQty,
+                            onAdd = { onProductClick(p) },
+                            onDecrease = { onDecreaseClick(p) }
+                        )
                     }
                 }
             }
@@ -178,16 +191,24 @@ private fun SearchBar(
 }
 
 @Composable
-private fun ProductCard(product: KasirProduct, onClick: () -> Unit) {
+private fun ProductCard(
+    product: KasirProduct,
+    cartQty: Int,
+    onAdd: () -> Unit,
+    onDecrease: () -> Unit
+) {
     val shape = RoundedCornerShape(14.dp)
+    val hasItem = cartQty > 0
+    val borderStroke = if (hasItem) BorderStroke(1.5.dp, PosPrimary) else BorderStroke(1.dp, PosBorder)
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onAdd),
         shape = shape,
         color = Color.White,
-        border = BorderStroke(1.dp, PosBorder)
+        border = borderStroke
     ) {
         Column(Modifier.padding(10.dp)) {
             // placeholder gambar produk (ganti dengan AsyncImage kalau sudah ada foto)
@@ -197,17 +218,18 @@ private fun ProductCard(product: KasirProduct, onClick: () -> Unit) {
                     .height(34.dp)
                     .background(PosSoft.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 product.name,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = PosInk,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(4.dp))
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 22.dp),
+                Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -218,10 +240,82 @@ private fun ProductCard(product: KasirProduct, onClick: () -> Unit) {
                     color = PosPrimary,
                     maxLines = 1
                 )
-                if (product.stock <= product.lowStockAt) {
-                    PosBadge("Stok ${product.stock}", PosWarnBg, PosWarnText)
-                } else {
-                    Text("Stok ${product.stock}", fontSize = 10.sp, color = PosMuted)
+                if (!hasItem) {
+                    if (product.stock <= product.lowStockAt && product.stock > 0) {
+                        PosBadge("Stok ${product.stock}", PosWarnBg, PosWarnText)
+                    } else if (product.stock > product.lowStockAt) {
+                        Text("Stok ${product.stock}", fontSize = 10.sp, color = PosMuted)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // Kontrol Kuantitas (Height 30.dp)
+            if (hasItem) {
+                val canAddMore = cartQty < product.stock
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(30.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White)
+                            .border(1.dp, PosBorder, RoundedCornerShape(8.dp))
+                            .clickable(onClick = onDecrease),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Remove,
+                            contentDescription = "Kurang",
+                            tint = PosPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Text(
+                        text = "$cartQty",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PosInk,
+                        textAlign = TextAlign.Center
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (canAddMore) PosPrimary else PosPrimary.copy(alpha = 0.4f))
+                            .clickable(enabled = canAddMore, onClick = onAdd),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Tambah",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            } else {
+                val isAvailable = product.stock > 0
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(30.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isAvailable) PosSoft else PosBorder)
+                        .clickable(enabled = isAvailable, onClick = onAdd),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isAvailable) "+ Tambah" else "Stok Habis",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isAvailable) PosPrimary else PosMuted
+                    )
                 }
             }
         }
@@ -289,7 +383,9 @@ private fun KasirScreenPreview() {
             cartProductCount = 3,
             cartItemCount = 10,
             cartTotal = 31_500,
+            cartQuantities = mapOf(1L to 2, 2L to 5, 3L to 3),
             onProductClick = {},
+            onDecreaseClick = {},
             onScanClick = {},
             onCartClick = {},
             modifier = Modifier.padding(pad)
