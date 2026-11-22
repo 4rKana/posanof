@@ -44,9 +44,12 @@ fun AddEditProductScreen(
     val categories = listOf("Minuman", "Makanan", "Sembako", "Lainnya")
     
     if (showScanner) {
-        CameraScannerView(
+        BarcodeScannerOverlay(
             onBarcodeScanned = { barcode ->
                 barcodeInput = barcode
+                showScanner = false
+            },
+            onBack = {
                 showScanner = false
             }
         )

@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+enum class QrisMode { DYNAMIC, STATIC }
+
 class SettingsManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("posanof_settings", Context.MODE_PRIVATE)
 
@@ -26,6 +28,23 @@ class SettingsManager(context: Context) {
 
     private val _lastBackupTimestamp = MutableStateFlow(prefs.getLong("lastBackupTimestamp", 0L))
     val lastBackupTimestamp: StateFlow<Long> = _lastBackupTimestamp.asStateFlow()
+
+    private val _requirePinOnLaunch = MutableStateFlow(prefs.getBoolean("requirePinOnLaunch", false))
+    val requirePinOnLaunch: StateFlow<Boolean> = _requirePinOnLaunch.asStateFlow()
+
+    private val initialQrisMode = try {
+        QrisMode.valueOf(prefs.getString("qrisMode", QrisMode.DYNAMIC.name) ?: QrisMode.DYNAMIC.name)
+    } catch (_: Exception) {
+        QrisMode.DYNAMIC
+    }
+    private val _qrisMode = MutableStateFlow(initialQrisMode)
+    val qrisMode: StateFlow<QrisMode> = _qrisMode.asStateFlow()
+
+    private val _qrisRawPayload = MutableStateFlow(prefs.getString("qrisRawPayload", "") ?: "")
+    val qrisRawPayload: StateFlow<String> = _qrisRawPayload.asStateFlow()
+
+    private val _qrisStaticImagePath = MutableStateFlow(prefs.getString("qrisStaticImagePath", "") ?: "")
+    val qrisStaticImagePath: StateFlow<String> = _qrisStaticImagePath.asStateFlow()
 
     fun updateStoreName(name: String) {
         prefs.edit().putString("storeName", name).apply()
@@ -56,6 +75,45 @@ class SettingsManager(context: Context) {
     fun updateLastBackupTimestamp(timestamp: Long) {
         prefs.edit().putLong("lastBackupTimestamp", timestamp).apply()
         _lastBackupTimestamp.value = timestamp
+    }
+
+    fun updateRequirePinOnLaunch(enabled: Boolean) {
+        prefs.edit().putBoolean("requirePinOnLaunch", enabled).apply()
+        _requirePinOnLaunch.value = enabled
+    }
+
+    fun updateQrisMode(mode: QrisMode) {
+        prefs.edit().putString("qrisMode", mode.name).apply()
+        _qrisMode.value = mode
+    }
+
+    fun updateQrisRawPayload(payload: String) {
+        prefs.edit().putString("qrisRawPayload", payload).apply()
+        _qrisRawPayload.value = payload
+    }
+
+    fun clearQrisRawPayload() {
+        prefs.edit().remove("qrisRawPayload").apply()
+        _qrisRawPayload.value = ""
+    }
+
+    fun updateQrisStaticImagePath(path: String) {
+        prefs.edit().putString("qrisStaticImagePath", path).apply()
+        _qrisStaticImagePath.value = path
+    }
+
+    fun clearQrisStaticImage(context: Context) {
+        val currentPath = _qrisStaticImagePath.value
+        if (currentPath.isNotBlank()) {
+            try {
+                val file = java.io.File(currentPath)
+                if (file.exists()) {
+                    file.delete()
+                }
+            } catch (_: Exception) {}
+        }
+        prefs.edit().remove("qrisStaticImagePath").apply()
+        _qrisStaticImagePath.value = ""
     }
 
     companion object {

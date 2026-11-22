@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.android.posanof.data.local.SettingsManager
 import com.android.posanof.ui.components.*
+import com.android.posanof.util.SafeFileSaver
 import com.android.posanof.util.ReportExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -41,6 +47,8 @@ fun DashboardScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val period by viewModel.selectedPeriod.collectAsState()
+    val selectedMonth by viewModel.selectedMonth.collectAsState()
+    val selectedYear by viewModel.selectedYear.collectAsState()
     val totalSales by viewModel.totalSales.collectAsState()
     val transactionCount by viewModel.transactionCount.collectAsState()
     val last7DaysSales by viewModel.last7DaysSales.collectAsState()
@@ -110,6 +118,15 @@ fun DashboardScreen(
             selectedIndex = period.ordinal,
             onSelect = { viewModel.updatePeriod(DashboardPeriod.entries[it]) }
         )
+
+        if (period == DashboardPeriod.BULANAN) {
+            MonthYearBar(
+                month = selectedMonth,
+                year = selectedYear,
+                onPrevious = { viewModel.previousMonth() },
+                onNext = { viewModel.nextMonth() }
+            )
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PosCard(Modifier.weight(1f)) {
@@ -201,7 +218,27 @@ fun DashboardScreen(
                 text = "Ekspor Excel",
                 onClick = {
                     val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                    createExcelLauncher.launch("Laporan_Penjualan_$timestamp.xlsx")
+                    val fileName = "Laporan_Penjualan_$timestamp.xlsx"
+                    try {
+                        createExcelLauncher.launch(fileName)
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        coroutineScope.launch {
+                            try {
+                                val path = withContext(Dispatchers.IO) {
+                                    SafeFileSaver.saveToDownloadsFallback(
+                                        context = context,
+                                        fileName = fileName,
+                                        mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    ) { stream ->
+                                        ReportExporter.exportToExcel(currentTransactions, stream, title = "LAPORAN PENJUALAN $storeName")
+                                    }
+                                }
+                                Toast.makeText(context, "Tersimpan di: $path", Toast.LENGTH_LONG).show()
+                            } catch (err: Exception) {
+                                Toast.makeText(context, "Gagal ekspor Excel: ${err.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier.weight(1f)
             )
@@ -209,11 +246,59 @@ fun DashboardScreen(
                 text = "Ekspor PDF",
                 onClick = {
                     val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                    createPdfLauncher.launch("Laporan_Keuangan_$timestamp.pdf")
+                    val fileName = "Laporan_Keuangan_$timestamp.pdf"
+                    try {
+                        createPdfLauncher.launch(fileName)
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        coroutineScope.launch {
+                            try {
+                                val path = withContext(Dispatchers.IO) {
+                                    SafeFileSaver.saveToDownloadsFallback(
+                                        context = context,
+                                        fileName = fileName,
+                                        mimeType = "application/pdf"
+                                    ) { stream ->
+                                        ReportExporter.exportToPdf(currentTransactions, stream, storeName = storeName)
+                                    }
+                                }
+                                Toast.makeText(context, "Tersimpan di: $path", Toast.LENGTH_LONG).show()
+                            } catch (err: Exception) {
+                                Toast.makeText(context, "Gagal ekspor PDF: ${err.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier.weight(1f)
             )
         }
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+fun MonthYearBar(
+    month: Int,
+    year: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val monthNames = listOf("Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember")
+    val monthText = "${monthNames.getOrElse(month - 1) { "" }} $year"
+
+    PosCard(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onPrevious) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Sebelumnya", tint = PosInk)
+            }
+            Text(monthText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = PosInk)
+            IconButton(onClick = onNext) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Berikutnya", tint = PosInk)
+            }
+        }
     }
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -37,9 +38,17 @@ class DashboardViewModel(
     private val _selectedPeriod = MutableStateFlow(DashboardPeriod.HARIAN)
     val selectedPeriod: StateFlow<DashboardPeriod> = _selectedPeriod.asStateFlow()
 
+    private val _selectedMonth = MutableStateFlow(Calendar.getInstance().get(Calendar.MONTH) + 1)
+    val selectedMonth: StateFlow<Int> = _selectedMonth.asStateFlow()
+
+    private val _selectedYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR))
+    val selectedYear: StateFlow<Int> = _selectedYear.asStateFlow()
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val currentTransactions: StateFlow<List<TransactionWithDetails>> = _selectedPeriod.flatMapLatest { period ->
-        val (start, end) = getTimestampsForPeriod(period)
+    val currentTransactions: StateFlow<List<TransactionWithDetails>> = combine(_selectedPeriod, _selectedMonth, _selectedYear) { period, month, year ->
+        Triple(period, month, year)
+    }.flatMapLatest { (period, month, year) ->
+        val (start, end) = getTimestampsForPeriod(period, month, year)
         transactionRepository.getTransactionsByDateRange(start, end)
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -51,8 +60,10 @@ class DashboardViewModel(
         .stateIn(viewModelScope, SharingStarted.Lazily, 0)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val topProducts: StateFlow<List<TopProductSales>> = _selectedPeriod.flatMapLatest { period ->
-        val (start, end) = getTimestampsForPeriod(period)
+    val topProducts: StateFlow<List<TopProductSales>> = combine(_selectedPeriod, _selectedMonth, _selectedYear) { period, month, year ->
+        Triple(period, month, year)
+    }.flatMapLatest { (period, month, year) ->
+        val (start, end) = getTimestampsForPeriod(period, month, year)
         transactionRepository.getTopProducts(start, end)
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -61,7 +72,7 @@ class DashboardViewModel(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val last7DaysSales: StateFlow<List<DailySales>> = _selectedPeriod.flatMapLatest { _ -> // update when period changes just in case, but really just last 7 days
-        val (start, end) = getTimestampsForPeriod(DashboardPeriod.MINGGUAN)
+        val (start, end) = getTimestampsForPeriod(DashboardPeriod.MINGGUAN, _selectedMonth.value, _selectedYear.value)
         transactionRepository.getTransactionsByDateRange(start, end).map { transactions ->
             processLast7DaysSales(transactions)
         }
@@ -71,9 +82,31 @@ class DashboardViewModel(
         _selectedPeriod.value = period
     }
 
-    private fun getTimestampsForPeriod(period: DashboardPeriod): Pair<Long, Long> {
+    fun previousMonth() {
+        if (_selectedMonth.value == 1) {
+            _selectedMonth.value = 12
+            _selectedYear.value -= 1
+        } else {
+            _selectedMonth.value -= 1
+        }
+    }
+
+    fun nextMonth() {
+        if (_selectedMonth.value == 12) {
+            _selectedMonth.value = 1
+            _selectedYear.value += 1
+        } else {
+            _selectedMonth.value += 1
+        }
+    }
+
+    fun updateMonthYear(month: Int, year: Int) {
+        _selectedMonth.value = month.coerceIn(1, 12)
+        _selectedYear.value = year
+    }
+
+    private fun getTimestampsForPeriod(period: DashboardPeriod, month: Int, year: Int): Pair<Long, Long> {
         val calendar = Calendar.getInstance()
-        val end = calendar.timeInMillis
         
         when (period) {
             DashboardPeriod.HARIAN -> {
@@ -82,6 +115,13 @@ class DashboardViewModel(
                 calendar.set(Calendar.SECOND, 0)
                 calendar.set(Calendar.MILLISECOND, 0)
                 val start = calendar.timeInMillis
+                
+                calendar.set(Calendar.HOUR_OF_DAY, 23)
+                calendar.set(Calendar.MINUTE, 59)
+                calendar.set(Calendar.SECOND, 59)
+                calendar.set(Calendar.MILLISECOND, 999)
+                val end = calendar.timeInMillis
+                
                 return Pair(start, end)
             }
             DashboardPeriod.MINGGUAN -> {
@@ -92,15 +132,34 @@ class DashboardViewModel(
                 calendar.set(Calendar.SECOND, 0)
                 calendar.set(Calendar.MILLISECOND, 0)
                 val start = calendar.timeInMillis
+                
+                calendar.add(Calendar.DAY_OF_YEAR, 6)
+                calendar.set(Calendar.HOUR_OF_DAY, 23)
+                calendar.set(Calendar.MINUTE, 59)
+                calendar.set(Calendar.SECOND, 59)
+                calendar.set(Calendar.MILLISECOND, 999)
+                val end = calendar.timeInMillis
+                
                 return Pair(start, end)
             }
             DashboardPeriod.BULANAN -> {
+                calendar.set(Calendar.YEAR, year)
+                calendar.set(Calendar.MONTH, month - 1)
                 calendar.set(Calendar.DAY_OF_MONTH, 1)
                 calendar.set(Calendar.HOUR_OF_DAY, 0)
                 calendar.set(Calendar.MINUTE, 0)
                 calendar.set(Calendar.SECOND, 0)
                 calendar.set(Calendar.MILLISECOND, 0)
                 val start = calendar.timeInMillis
+                
+                val lastDay = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
+                calendar.set(Calendar.DAY_OF_MONTH, lastDay)
+                calendar.set(Calendar.HOUR_OF_DAY, 23)
+                calendar.set(Calendar.MINUTE, 59)
+                calendar.set(Calendar.SECOND, 59)
+                calendar.set(Calendar.MILLISECOND, 999)
+                val end = calendar.timeInMillis
+                
                 return Pair(start, end)
             }
         }

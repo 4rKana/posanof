@@ -1,5 +1,6 @@
 package com.android.posanof.ui.report
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,9 +27,13 @@ fun TransactionHistoryScreen(
     modifier: Modifier = Modifier
 ) {
     val period by viewModel.selectedPeriod.collectAsState()
+    val selectedMonth by viewModel.selectedMonth.collectAsState()
+    val selectedYear by viewModel.selectedYear.collectAsState()
     val transactions by viewModel.currentTransactions.collectAsState()
 
     val format = SimpleDateFormat("HH.mm", Locale("id", "ID"))
+
+    BackHandler(onBack = onBack)
 
     Column(
         modifier = modifier
@@ -38,12 +43,21 @@ fun TransactionHistoryScreen(
         PosTopBar(title = "Riwayat Transaksi", onBack = onBack)
 
         val options = listOf("Hari ini", "Minggu ini", "Bulan ini")
-        Box(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             PosSegmented(
                 options = options,
                 selectedIndex = period.ordinal,
                 onSelect = { viewModel.updatePeriod(DashboardPeriod.entries[it]) }
             )
+            if (period == DashboardPeriod.BULANAN) {
+                Spacer(Modifier.height(8.dp))
+                MonthYearBar(
+                    month = selectedMonth,
+                    year = selectedYear,
+                    onPrevious = { viewModel.previousMonth() },
+                    onNext = { viewModel.nextMonth() }
+                )
+            }
         }
 
         LazyColumn(
@@ -69,10 +83,10 @@ fun TransactionHistoryScreen(
                                 color = PosInk
                             )
                             Spacer(Modifier.height(4.dp))
-                            val methodPart = if (trans.paymentMethod.equals("KASBON", ignoreCase = true)) {
-                                "Kasbon"
-                            } else {
-                                "Tunai"
+                            val methodPart = when {
+                                trans.paymentMethod.equals("KASBON", ignoreCase = true) -> "Kasbon"
+                                trans.paymentMethod.equals("QRIS", ignoreCase = true) -> "QRIS"
+                                else -> "Tunai"
                             }
                             Text(
                                 text = "$dateStr · $methodPart",

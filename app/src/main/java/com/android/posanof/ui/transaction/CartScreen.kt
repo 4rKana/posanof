@@ -40,7 +40,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import com.android.posanof.data.local.QrisMode
 import com.android.posanof.data.local.SettingsManager
+import com.android.posanof.util.QrisGenerator
+import java.io.File
 import com.android.posanof.util.ReportExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -62,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.android.posanof.data.local.entity.ProductEntity
 import com.android.posanof.ui.components.PosBackground
+import com.android.posanof.ui.components.PosBadge
 import com.android.posanof.ui.components.PosBorder
 import com.android.posanof.ui.components.PosCard
 import com.android.posanof.ui.components.PosDanger
@@ -105,7 +112,7 @@ fun CartRoute(
     // Jadi datanya dicatat dulu sesaat sebelum checkout untuk layar sukses dan struk.
     var snapTotal by rememberSaveable { mutableStateOf(0.0) }
     var snapCash by rememberSaveable { mutableStateOf(0.0) }
-    var snapIsCash by rememberSaveable { mutableStateOf(true) }
+    var snapMethod by rememberSaveable { mutableStateOf("TUNAI") }
     var snapName by rememberSaveable { mutableStateOf("") }
     var snapPhone by rememberSaveable { mutableStateOf("") }
     var snapTime by rememberSaveable { mutableStateOf(0L) }
@@ -124,14 +131,21 @@ fun CartRoute(
         val rows = mutableListOf<Pair<String, String>>()
         rows.add("No. Transaksi" to "#" + result.transactionId.toString().padStart(4, '0'))
         rows.add("Tanggal" to formatReceiptDate(snapTime))
-        if (snapIsCash) {
-            rows.add("Metode" to "Tunai")
-            rows.add("Uang diterima" to snapCash.toLong().toRupiah())
-            rows.add("Kembalian" to result.changeAmount.toLong().toRupiah())
-        } else {
-            rows.add("Metode" to "Kasbon")
-            if (snapName.isNotBlank()) rows.add("Pelanggan" to snapName)
-            rows.add("Nominal hutang" to snapTotal.toLong().toRupiah())
+        when (snapMethod) {
+            "TUNAI" -> {
+                rows.add("Metode" to "Tunai")
+                rows.add("Uang diterima" to snapCash.toLong().toRupiah())
+                rows.add("Kembalian" to result.changeAmount.toLong().toRupiah())
+            }
+            "QRIS" -> {
+                rows.add("Metode" to "QRIS")
+                rows.add("Status" to "Lunas")
+            }
+            else -> {
+                rows.add("Metode" to "Kasbon")
+                if (snapName.isNotBlank()) rows.add("Pelanggan" to snapName)
+                rows.add("Nominal hutang" to snapTotal.toLong().toRupiah())
+            }
         }
         
         val createPdfLauncher = rememberLauncherForActivityResult(
@@ -162,14 +176,40 @@ fun CartRoute(
         TransactionSuccessScreen(
             total = snapTotal.toLong(),
             rows = rows,
-            statusBadge = if (snapIsCash) null else "Belum Lunas",
+            statusBadge = if (snapMethod == "KASBON") "Belum Lunas" else null,
             onSendWhatsApp = {
                 val text = buildReceiptText(rows, snapItems, snapTotal.toLong().toRupiah())
                 shareReceiptToWhatsApp(context, snapPhone, text)
             },
             onSavePdf = {
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                createPdfLauncher.launch("Struk_${result.transactionId}_$timestamp.pdf")
+                val fileName = "Struk_${result.transactionId}_$timestamp.pdf"
+                try {
+                    createPdfLauncher.launch(fileName)
+                } catch (_: android.content.ActivityNotFoundException) {
+                    coroutineScope.launch {
+                        try {
+                            val path = withContext(Dispatchers.IO) {
+                                com.android.posanof.util.SafeFileSaver.saveToDownloadsFallback(
+                                    context = context,
+                                    fileName = fileName,
+                                    mimeType = "application/pdf"
+                                ) { stream ->
+                                    ReportExporter.exportReceiptToPdf(
+                                        outputStream = stream,
+                                        storeName = storeName,
+                                        rows = rows,
+                                        items = snapItems,
+                                        total = snapTotal.toLong().toRupiah()
+                                    )
+                                }
+                            }
+                            Toast.makeText(context, "Struk PDF tersimpan di: $path", Toast.LENGTH_LONG).show()
+                        } catch (err: Exception) {
+                            Toast.makeText(context, "Gagal ekspor PDF: ${err.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
             },
             onNewTransaction = finish,
             modifier = modifier
@@ -186,6 +226,7 @@ fun CartRoute(
             method = method,
             customerName = customerName,
             customerPhone = customerPhone,
+            settingsManager = settingsManager,
             isProcessing = result is CheckoutResult.Loading,
             onBack = onBack,
             onQuantityChange = viewModel::updateQuantity,
@@ -196,7 +237,7 @@ fun CartRoute(
             onCheckout = {
                 snapTotal = total
                 snapCash = cashAmount
-                snapIsCash = method == PaymentMethod.TUNAI
+                snapMethod = method.name
                 snapName = customerName.trim()
                 snapPhone = customerPhone.trim()
                 snapTime = System.currentTimeMillis()
@@ -235,6 +276,7 @@ fun CartScreen(
     method: PaymentMethod,
     customerName: String,
     customerPhone: String,
+    settingsManager: SettingsManager? = null,
     isProcessing: Boolean,
     onBack: () -> Unit,
     onQuantityChange: (productId: Int, newQuantity: Int) -> Unit,
@@ -245,12 +287,31 @@ fun CartScreen(
     onCheckout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isCash = method == PaymentMethod.TUNAI
     val totalLong = total.toLong()
-    val segmentIndex = if (isCash) 0 else 1
-    val onSegmentSelect: (Int) -> Unit = {
-        onMethodChange(if (it == 0) PaymentMethod.TUNAI else PaymentMethod.KASBON)
+    val segmentIndex = when (method) {
+        PaymentMethod.TUNAI -> 0
+        PaymentMethod.QRIS -> 1
+        PaymentMethod.KASBON -> 2
     }
+    val onSegmentSelect: (Int) -> Unit = {
+        onMethodChange(
+            when (it) {
+                0 -> PaymentMethod.TUNAI
+                1 -> PaymentMethod.QRIS
+                else -> PaymentMethod.KASBON
+            }
+        )
+    }
+
+    val qrisMode = settingsManager?.qrisMode?.collectAsState()?.value ?: QrisMode.DYNAMIC
+    val qrisRawPayload = settingsManager?.qrisRawPayload?.collectAsState()?.value ?: ""
+    val qrisStaticImagePath = settingsManager?.qrisStaticImagePath?.collectAsState()?.value ?: ""
+
+    var overrideQrisMode by remember { mutableStateOf<QrisMode?>(null) }
+    val activeQrisMode = overrideQrisMode ?: qrisMode
+
+    val isDynamicAvailable = qrisRawPayload.isNotBlank() && QrisGenerator.isValidQrisPayload(qrisRawPayload)
+    val isStaticAvailable = qrisStaticImagePath.isNotBlank() && File(qrisStaticImagePath).exists()
 
     Column(modifier.fillMaxSize().background(PosBackground)) {
         PosTopBar(
@@ -285,128 +346,228 @@ fun CartScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (isCash) {
-                    // ---------- Tunai (layar 3) ----------
-                    PosCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(horizontal = 12.dp)) {
-                            items.forEachIndexed { index, item ->
-                                if (index > 0) HorizontalDivider(color = PosBorder)
-                                CartLineRow(item, onQuantityChange)
+                when (method) {
+                    PaymentMethod.TUNAI -> {
+                        // ---------- Tunai (layar 3) ----------
+                        PosCard(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(horizontal = 12.dp)) {
+                                items.forEachIndexed { index, item ->
+                                    if (index > 0) HorizontalDivider(color = PosBorder)
+                                    CartLineRow(item, onQuantityChange)
+                                }
                             }
                         }
-                    }
 
-                    PosCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SummaryRow("Subtotal", subtotal.toLong().toRupiah())
-                            SummaryRow("Diskon", discountAmount.toLong().toRupiah())
-                            SummaryRow("Pajak", taxAmount.toLong().toRupiah())
-                            HorizontalDivider(color = PosBorder, modifier = Modifier.padding(vertical = 4.dp))
-                            SummaryRow("Total", totalLong.toRupiah(), bold = true)
+                        PosCard(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                SummaryRow("Subtotal", subtotal.toLong().toRupiah())
+                                SummaryRow("Diskon", discountAmount.toLong().toRupiah())
+                                SummaryRow("Pajak", taxAmount.toLong().toRupiah())
+                                HorizontalDivider(color = PosBorder, modifier = Modifier.padding(vertical = 4.dp))
+                                SummaryRow("Total", totalLong.toRupiah(), bold = true)
+                            }
                         }
-                    }
 
-                    PosSegmented(listOf("Tunai", "Kasbon"), segmentIndex, onSegmentSelect)
+                        PosSegmented(listOf("Tunai", "QRIS", "Kasbon"), segmentIndex, onSegmentSelect)
 
-                    PosTextField(
-                        label = "Uang diterima",
-                        value = if (cashAmount == 0.0) "" else cashAmount.toLong().toString(),
-                        onValueChange = { onCashChange(it.filter(Char::isDigit).toDoubleOrNull() ?: 0.0) },
-                        placeholder = "Rp 0",
-                        keyboardType = KeyboardType.Number
-                    )
+                        PosTextField(
+                            label = "Uang diterima",
+                            value = if (cashAmount == 0.0) "" else cashAmount.toLong().toString(),
+                            onValueChange = { onCashChange(it.filter(Char::isDigit).toDoubleOrNull() ?: 0.0) },
+                            placeholder = "Rp 0",
+                            keyboardType = KeyboardType.Number
+                        )
 
-                    // Uang pas + 2 nominal terdekat yang cukup untuk membayar
-                    val suggestions = listOf(20_000L, 50_000L, 100_000L, 200_000L)
-                        .filter { it >= totalLong }
-                        .take(2)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        QuickCashChip("Uang pas", Modifier.weight(1f)) { onCashChange(total) }
-                        suggestions.forEach { nominal ->
-                            QuickCashChip(
-                                nominal.toRupiah().removePrefix("Rp "),
-                                Modifier.weight(1f)
-                            ) { onCashChange(nominal.toDouble()) }
+                        // Uang pas + 2 nominal terdekat yang cukup untuk membayar
+                        val suggestions = listOf(20_000L, 50_000L, 100_000L, 200_000L)
+                            .filter { it >= totalLong }
+                            .take(2)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            QuickCashChip("Uang pas", Modifier.weight(1f)) { onCashChange(total) }
+                            suggestions.forEach { nominal ->
+                                QuickCashChip(
+                                    nominal.toRupiah().removePrefix("Rp "),
+                                    Modifier.weight(1f)
+                                ) { onCashChange(nominal.toDouble()) }
+                            }
                         }
-                    }
 
-                    val shortfall = total - cashAmount
-                    val isShort = cashAmount > 0.0 && shortfall > 0.0
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (isShort) Color(0xFFFDE8E6) else PosSoft,
-                                RoundedCornerShape(10.dp)
-                            )
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (isShort) "Kurang" else "Kembalian",
-                            modifier = Modifier.weight(1f),
-                            color = PosInk,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            (if (isShort) shortfall else changeAmount).toLong().toRupiah(),
-                            color = if (isShort) PosDanger else PosPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    }
-                } else {
-                    // ---------- Kasbon (layar 4) ----------
-                    PosCard(Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "${items.size} produk · ${items.sumOf { it.quantity }} item",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp
+                        val shortfall = total - cashAmount
+                        val isShort = cashAmount > 0.0 && shortfall > 0.0
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isShort) Color(0xFFFDE8E6) else PosSoft,
+                                    RoundedCornerShape(10.dp)
                                 )
-                                Text("Total belanja", fontSize = 11.sp, color = PosMuted)
-                            }
-                            Text(totalLong.toRupiah(), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                if (isShort) "Kurang" else "Kembalian",
+                                modifier = Modifier.weight(1f),
+                                color = PosInk,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                (if (isShort) shortfall else changeAmount).toLong().toRupiah(),
+                                color = if (isShort) PosDanger else PosPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
                         }
                     }
 
-                    PosSegmented(listOf("Tunai", "Kasbon"), segmentIndex, onSegmentSelect)
+                    PaymentMethod.QRIS -> {
+                        // ---------- QRIS ----------
+                        PosCard(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                SummaryRow("Subtotal", subtotal.toLong().toRupiah())
+                                SummaryRow("Diskon", discountAmount.toLong().toRupiah())
+                                SummaryRow("Pajak", taxAmount.toLong().toRupiah())
+                                HorizontalDivider(color = PosBorder, modifier = Modifier.padding(vertical = 4.dp))
+                                SummaryRow("Total", totalLong.toRupiah(), bold = true)
+                            }
+                        }
 
-                    PosTextField(
-                        label = "Nama pelanggan",
-                        value = customerName,
-                        onValueChange = { onCustomerChange(it, customerPhone) },
-                        placeholder = "Contoh: Bu Ratna"
-                    )
-                    PosTextField(
-                        label = "No. HP / WhatsApp (opsional)",
-                        value = customerPhone,
-                        onValueChange = { onCustomerChange(customerName, it) },
-                        placeholder = "0812 3456 7890",
-                        keyboardType = KeyboardType.Phone
-                    )
-                    // Hutang dicatat sebesar total belanja (sesuai logika checkout yang ada)
-                    ReadOnlyField("Nominal hutang", totalLong.toRupiah())
+                        PosSegmented(listOf("Tunai", "QRIS", "Kasbon"), segmentIndex, onSegmentSelect)
 
-                    PosWarningBox("Dicatat sebagai piutang pelanggan.\nStok otomatis berkurang setelah disimpan.")
+                        if (isDynamicAvailable && isStaticAvailable) {
+                            PosSegmented(
+                                options = listOf("QRIS Dinamis", "QRIS Statis"),
+                                selectedIndex = if (activeQrisMode == QrisMode.DYNAMIC) 0 else 1,
+                                onSelect = { overrideQrisMode = if (it == 0) QrisMode.DYNAMIC else QrisMode.STATIC }
+                            )
+                        }
+
+                        if (activeQrisMode == QrisMode.DYNAMIC && isDynamicAvailable) {
+                            val dynamicPayload = remember(qrisRawPayload, totalLong) {
+                                QrisGenerator.generateDynamicQris(qrisRawPayload, totalLong)
+                            }
+                            val merchantName = remember(qrisRawPayload) {
+                                QrisGenerator.extractMerchantName(qrisRawPayload) ?: "Toko UMKM"
+                            }
+                            val qrBitmap = remember(dynamicPayload) {
+                                try { QrisGenerator.generateQrBitmap(dynamicPayload, 512) } catch (_: Exception) { null }
+                            }
+
+                            PosCard(Modifier.fillMaxWidth()) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(merchantName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = PosInk)
+                                        PosBadge("Nominal otomatis")
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    if (qrBitmap != null) {
+                                        Image(
+                                            bitmap = qrBitmap.asImageBitmap(),
+                                            contentDescription = "QRIS Code",
+                                            modifier = Modifier.size(200.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(totalLong.toRupiah(), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = PosPrimary)
+                                }
+                            }
+                        } else if (activeQrisMode == QrisMode.STATIC && isStaticAvailable) {
+                            val staticBitmap = remember(qrisStaticImagePath) {
+                                BitmapFactory.decodeFile(qrisStaticImagePath)
+                            }
+
+                            PosCard(Modifier.fillMaxWidth()) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    if (staticBitmap != null) {
+                                        Image(
+                                            bitmap = staticBitmap.asImageBitmap(),
+                                            contentDescription = "QRIS Statis",
+                                            modifier = Modifier.size(200.dp).clip(RoundedCornerShape(8.dp))
+                                        )
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(totalLong.toRupiah(), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = PosPrimary)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Pembeli mengetik nominal manual", fontSize = 11.sp, color = PosMuted)
+                                }
+                            }
+                        } else {
+                            PosWarningBox("QRIS toko belum diatur di menu Admin -> Pengaturan. Anda tetap bisa menggunakan papan QRIS fisik.")
+                        }
+                    }
+
+                    PaymentMethod.KASBON -> {
+                        // ---------- Kasbon (layar 4) ----------
+                        PosCard(Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "${items.size} produk · ${items.sumOf { it.quantity }} item",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text("Total belanja", fontSize = 11.sp, color = PosMuted)
+                                }
+                                Text(totalLong.toRupiah(), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                            }
+                        }
+
+                        PosSegmented(listOf("Tunai", "QRIS", "Kasbon"), segmentIndex, onSegmentSelect)
+
+                        PosTextField(
+                            label = "Nama pelanggan",
+                            value = customerName,
+                            onValueChange = { onCustomerChange(it, customerPhone) },
+                            placeholder = "Contoh: Bu Ratna"
+                        )
+                        PosTextField(
+                            label = "No. HP / WhatsApp (opsional)",
+                            value = customerPhone,
+                            onValueChange = { onCustomerChange(customerName, it) },
+                            placeholder = "0812 3456 7890",
+                            keyboardType = KeyboardType.Phone
+                        )
+                        // Hutang dicatat sebesar total belanja (sesuai logika checkout yang ada)
+                        ReadOnlyField("Nominal hutang", totalLong.toRupiah())
+
+                        PosWarningBox("Dicatat sebagai piutang pelanggan.\nStok otomatis berkurang setelah disimpan.")
+                    }
                 }
                 Spacer(Modifier.height(4.dp))
             }
 
             Box(Modifier.padding(16.dp)) {
-                if (isCash) {
-                    PosPrimaryButton(
-                        text = if (isProcessing) "Memproses..." else "Bayar ${totalLong.toRupiah()}",
-                        onClick = onCheckout,
-                        enabled = cashAmount >= total && !isProcessing
-                    )
-                } else {
-                    PosPrimaryButton(
-                        text = if (isProcessing) "Memproses..." else "Simpan Kasbon",
-                        onClick = onCheckout,
-                        enabled = customerName.isNotBlank() && !isProcessing
-                    )
+                when (method) {
+                    PaymentMethod.TUNAI -> {
+                        PosPrimaryButton(
+                            text = if (isProcessing) "Memproses..." else "Bayar ${totalLong.toRupiah()}",
+                            onClick = onCheckout,
+                            enabled = cashAmount >= total && !isProcessing
+                        )
+                    }
+                    PaymentMethod.QRIS -> {
+                        PosPrimaryButton(
+                            text = if (isProcessing) "Memproses..." else "Konfirmasi Bayar QRIS ${totalLong.toRupiah()}",
+                            onClick = onCheckout,
+                            enabled = !isProcessing
+                        )
+                    }
+                    PaymentMethod.KASBON -> {
+                        PosPrimaryButton(
+                            text = if (isProcessing) "Memproses..." else "Simpan Kasbon",
+                            onClick = onCheckout,
+                            enabled = customerName.isNotBlank() && !isProcessing
+                        )
+                    }
                 }
             }
         }

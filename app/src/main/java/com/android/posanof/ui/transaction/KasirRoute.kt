@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.android.posanof.data.local.SettingsManager
 import com.android.posanof.data.repository.ProductRepository
 import com.android.posanof.ui.transaction.scanner.POSScannerScreen
 
@@ -31,8 +32,6 @@ import com.android.posanof.ui.transaction.scanner.POSScannerScreen
  * Penghubung antara tampilan baru (KasirScreen) dan data asli
  * (POSTransactionViewModel + ProductRepository).
  */
-import com.android.posanof.data.local.SettingsManager
-
 @Composable
 fun KasirRoute(
     viewModel: POSTransactionViewModel,
@@ -77,6 +76,10 @@ fun KasirRoute(
             }
     }
 
+    val cartQuantities = remember(cartItems) {
+        cartItems.associate { it.product.id.toLong() to it.quantity }
+    }
+
     if (showCart) {
         BackHandler { showCart = false }
         CartRoute(
@@ -96,13 +99,23 @@ fun KasirRoute(
             cartProductCount = cartItems.size,
             cartItemCount = cartItems.sumOf { it.quantity },
             cartTotal = totalAmount.toLong(),
+            cartQuantities = cartQuantities,
             onProductClick = { kp ->
                 val entity = allProducts.firstOrNull { it.id.toLong() == kp.id }
+                val currentQty = cartQuantities[kp.id] ?: 0
                 when {
                     entity == null -> Unit
                     entity.stock <= 0 ->
                         Toast.makeText(context, "Stok ${entity.name} habis", Toast.LENGTH_SHORT).show()
+                    currentQty >= entity.stock ->
+                        Toast.makeText(context, "Stok ${entity.name} maksimal (${entity.stock})", Toast.LENGTH_SHORT).show()
                     else -> viewModel.addToCart(entity)
+                }
+            },
+            onDecreaseClick = { kp ->
+                val entity = allProducts.firstOrNull { it.id.toLong() == kp.id }
+                if (entity != null) {
+                    viewModel.decreaseCartItem(entity)
                 }
             },
             onScanClick = { showScanner = true },

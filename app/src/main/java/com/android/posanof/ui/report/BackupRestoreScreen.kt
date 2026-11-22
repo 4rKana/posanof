@@ -3,6 +3,7 @@ package com.android.posanof.ui.report
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,7 +21,10 @@ import androidx.compose.ui.unit.sp
 import com.android.posanof.data.local.SettingsManager
 import com.android.posanof.data.repository.BackupRepository
 import com.android.posanof.ui.components.*
+import com.android.posanof.util.SafeFileSaver
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -38,6 +42,8 @@ fun BackupRestoreScreen(
     var confirmRestoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
     
     val lastBackupTimestamp by settingsManager.lastBackupTimestamp.collectAsState()
+
+    BackHandler(onBack = onBack)
 
     val createBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -66,6 +72,14 @@ fun BackupRestoreScreen(
 
     val openRestoreLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            confirmRestoreUri = it
+        }
+    }
+
+    val getContentRestoreLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
             confirmRestoreUri = it
@@ -102,7 +116,34 @@ fun BackupRestoreScreen(
                         text = if (isProcessing) "Memproses..." else "Backup Sekarang",
                         onClick = {
                             val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                            createBackupLauncher.launch("POSANOF_BACKUP_$timestamp.backup")
+                            val fileName = "POSANOF_BACKUP_$timestamp.backup"
+                            try {
+                                createBackupLauncher.launch(fileName)
+                            } catch (_: android.content.ActivityNotFoundException) {
+                                coroutineScope.launch {
+                                    isProcessing = true
+                                    try {
+                                        var backupSummary: com.android.posanof.data.repository.BackupSummary? = null
+                                        val path = withContext(Dispatchers.IO) {
+                                            SafeFileSaver.saveToDownloadsFallback(
+                                                context = context,
+                                                fileName = fileName,
+                                                mimeType = "application/octet-stream"
+                                            ) { stream ->
+                                                val res = backupRepository.exportBackupToStream(stream)
+                                                backupSummary = res.getOrNull()
+                                            }
+                                        }
+                                        settingsManager.updateLastBackupTimestamp(System.currentTimeMillis())
+                                        val summaryText = backupSummary?.let { " (${it.productCount} Produk, ${it.transactionCount} Transaksi)" } ?: ""
+                                        Toast.makeText(context, "Backup berhasil tersimpan di: $path$summaryText", Toast.LENGTH_LONG).show()
+                                    } catch (err: Exception) {
+                                        Toast.makeText(context, "Gagal Backup: ${err.message}", Toast.LENGTH_LONG).show()
+                                    } finally {
+                                        isProcessing = false
+                                    }
+                                }
+                            }
                         },
                         enabled = !isProcessing
                     )
@@ -117,7 +158,17 @@ fun BackupRestoreScreen(
                     Spacer(Modifier.height(16.dp))
                     PosOutlineButton(
                         text = "Pilih File Backup",
-                        onClick = { openRestoreLauncher.launch(arrayOf("*/*")) },
+                        onClick = {
+                            try {
+                                openRestoreLauncher.launch(arrayOf("*/*"))
+                            } catch (_: android.content.ActivityNotFoundException) {
+                                try {
+                                    getContentRestoreLauncher.launch("*/*")
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Tidak ada aplikasi pengelola berkas yang mendukung.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

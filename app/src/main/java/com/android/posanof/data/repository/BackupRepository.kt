@@ -42,12 +42,8 @@ class BackupRepository(
     private val transactionDao = database.transactionDao()
     private val creditDao = database.creditDao()
 
-    /**
-     * Membaca Room DB, mengubah ke format JSON, mengenkripsi dengan AES-256 (GCM),
-     * dan menyimpan file ke eksternal storage via SAF.
-     */
-    suspend fun exportBackup(
-        destinationUri: Uri,
+    suspend fun exportBackupToStream(
+        outputStream: OutputStream,
         secretPassphrase: String = DEFAULT_PASSPHRASE
     ): Result<BackupSummary> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
@@ -137,11 +133,9 @@ class BackupRepository(
             // 2. Enkripsi AES-256 (GCM)
             val encryptedBytes = encryptData(jsonBytes, secretPassphrase)
 
-            // 3. Tulis file ke SAF Output Stream
-            context.contentResolver.openOutputStream(destinationUri)?.use { outputStream: OutputStream ->
-                outputStream.write(encryptedBytes)
-                outputStream.flush()
-            } ?: throw IllegalStateException("Tidak dapat membuka file tujuan untuk menulis backup.")
+            // 3. Tulis file ke Stream
+            outputStream.write(encryptedBytes)
+            outputStream.flush()
 
             val summary = BackupSummary(
                 productCount = products.size,
@@ -151,6 +145,23 @@ class BackupRepository(
             )
 
             Result.success(summary)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Membaca Room DB, mengubah ke format JSON, mengenkripsi dengan AES-256 (GCM),
+     * dan menyimpan file ke eksternal storage via SAF.
+     */
+    suspend fun exportBackup(
+        destinationUri: Uri,
+        secretPassphrase: String = DEFAULT_PASSPHRASE
+    ): Result<BackupSummary> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            context.contentResolver.openOutputStream(destinationUri)?.use { outputStream: OutputStream ->
+                exportBackupToStream(outputStream, secretPassphrase)
+            } ?: throw IllegalStateException("Tidak dapat membuka file tujuan untuk menulis backup.")
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -18,6 +18,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,6 +84,8 @@ fun MainAppNavigation(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val requirePinOnLaunch by settingsManager.requirePinOnLaunch.collectAsState()
+    var isAppUnlocked by remember { mutableStateOf(!requirePinOnLaunch || !authManager.isPinSet()) }
 
     var currentScreen by remember { mutableStateOf<Screen>(Screen.POS) }
     var pendingScreen by remember { mutableStateOf<Screen?>(null) }
@@ -91,6 +94,7 @@ fun MainAppNavigation(
     
     // Untuk navigasi di tab admin
     var adminActiveTab by remember { mutableStateOf(0) } // 0: Master Data, 1: Pengaturan
+    var showBackupRestore by remember { mutableStateOf(false) }
 
     val navItems = listOf(
         Screen.POS,
@@ -100,6 +104,18 @@ fun MainAppNavigation(
     )
 
     var reportScreen by remember { mutableStateOf("dashboard") }
+
+    if (!isAppUnlocked && requirePinOnLaunch && authManager.isPinSet()) {
+        com.android.posanof.ui.components.AdminPinScreen(
+            authManager = authManager,
+            mode = com.android.posanof.ui.components.PinMode.APP_LOCK,
+            onSuccess = {
+                isAppUnlocked = true
+            },
+            onCancel = {}
+        )
+        return
+    }
 
     Scaffold(
         bottomBar = {
@@ -178,56 +194,56 @@ fun MainAppNavigation(
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
-                        "backup" -> {
-                            BackupRestoreScreen(
-                                backupRepository = backupRepository,
-                                settingsManager = settingsManager,
-                                onBack = { reportScreen = "dashboard" },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
                     }
                 }
 
                 is Screen.Admin -> {
-                    androidx.compose.foundation.layout.Column {
-                        androidx.compose.material3.SecondaryTabRow(selectedTabIndex = adminActiveTab) {
-                            androidx.compose.material3.Tab(
-                                selected = adminActiveTab == 0,
-                                onClick = { adminActiveTab = 0 },
-                                text = { Text("Master Data") }
-                            )
-                            androidx.compose.material3.Tab(
-                                selected = adminActiveTab == 1,
-                                onClick = { adminActiveTab = 1 },
-                                text = { Text("Pengaturan") }
-                            )
-                        }
-                        if (adminActiveTab == 0) {
-                            ProductManagementScreen(
-                                productRepository = productRepository,
-                                settingsManager = settingsManager,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            SettingsScreen(
-                                settingsManager = settingsManager,
-                                authManager = authManager,
-                                onNavigateToChangePin = {
-                                    explicitPinMode = com.android.posanof.ui.components.PinMode.CHANGE
-                                    pendingScreen = Screen.Admin
-                                    showPinDialog = true
-                                },
-                                onNavigateToBackupRestore = { 
-                                    currentScreen = Screen.Report 
-                                    reportScreen = "backup"
-                                },
-                                onLogoutAdmin = {
-                                    android.widget.Toast.makeText(context, "Berhasil keluar Admin!", android.widget.Toast.LENGTH_SHORT).show()
-                                    currentScreen = Screen.POS
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                    if (showBackupRestore) {
+                        BackupRestoreScreen(
+                            backupRepository = backupRepository,
+                            settingsManager = settingsManager,
+                            onBack = { showBackupRestore = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        androidx.compose.foundation.layout.Column {
+                            androidx.compose.material3.SecondaryTabRow(selectedTabIndex = adminActiveTab) {
+                                androidx.compose.material3.Tab(
+                                    selected = adminActiveTab == 0,
+                                    onClick = { adminActiveTab = 0 },
+                                    text = { Text("Master Data") }
+                                )
+                                androidx.compose.material3.Tab(
+                                    selected = adminActiveTab == 1,
+                                    onClick = { adminActiveTab = 1 },
+                                    text = { Text("Pengaturan") }
+                                )
+                            }
+                            if (adminActiveTab == 0) {
+                                ProductManagementScreen(
+                                    productRepository = productRepository,
+                                    settingsManager = settingsManager,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                SettingsScreen(
+                                    settingsManager = settingsManager,
+                                    authManager = authManager,
+                                    onNavigateToChangePin = {
+                                        explicitPinMode = com.android.posanof.ui.components.PinMode.CHANGE
+                                        pendingScreen = Screen.Admin
+                                        showPinDialog = true
+                                    },
+                                    onNavigateToBackupRestore = { 
+                                        showBackupRestore = true
+                                    },
+                                    onLogoutAdmin = {
+                                        android.widget.Toast.makeText(context, "Berhasil keluar Admin!", android.widget.Toast.LENGTH_SHORT).show()
+                                        currentScreen = Screen.POS
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         }
                     }
                 }

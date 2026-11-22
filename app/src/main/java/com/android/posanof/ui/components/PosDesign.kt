@@ -44,13 +44,14 @@ fun Long.toRupiah(): String =
 fun PosCard(
     modifier: Modifier = Modifier,
     color: Color = Color.White,
+    borderColor: Color = PosBorder,
     content: @Composable () -> Unit
 ) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         color = color,
-        border = BorderStroke(1.dp, PosBorder),
+        border = BorderStroke(1.dp, borderColor),
         content = content
     )
 }

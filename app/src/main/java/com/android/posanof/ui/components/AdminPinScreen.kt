@@ -1,6 +1,7 @@
 package com.android.posanof.ui.components
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,7 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.android.posanof.security.AuthManager
 
 enum class PinMode {
-    VERIFY, CREATE, CHANGE
+    VERIFY, CREATE, CHANGE, APP_LOCK
 }
 
 @Composable
@@ -56,10 +57,19 @@ fun AdminPinScreen(
     var step by remember { mutableStateOf(if (mode == PinMode.CHANGE) 0 else 1) } // 0=Verify Old, 1=Enter New, 2=Confirm New
     var firstNewPin by remember { mutableStateOf("") }
 
-    val pinLength = 6 // Target 6 digit PIN (or we can just auto-submit at 6)
+    val pinLength = when (mode) {
+        PinMode.VERIFY, PinMode.APP_LOCK -> authManager.getStoredPinLength()
+        PinMode.CHANGE -> if (step == 0) authManager.getStoredPinLength() else 4
+        PinMode.CREATE -> 4
+    }
+    
+    BackHandler {
+        onCancel()
+    }
     
     val title = when (mode) {
         PinMode.VERIFY -> "Masukkan PIN Admin"
+        PinMode.APP_LOCK -> "Masukkan PIN"
         PinMode.CREATE -> if (step == 1) "Buat PIN Baru" else "Konfirmasi PIN Baru"
         PinMode.CHANGE -> {
             when (step) {
@@ -70,13 +80,21 @@ fun AdminPinScreen(
         }
     }
     
-    val subtitle = "Untuk membuka fitur Admin"
+    val subtitle = if (mode == PinMode.APP_LOCK) "Untuk membuka aplikasi" else "Untuk membuka fitur Admin"
 
     LaunchedEffect(currentPin) {
         if (currentPin.length == pinLength) {
             when (mode) {
                 PinMode.VERIFY -> {
                     if (authManager.loginAdmin(currentPin)) {
+                        onSuccess()
+                    } else {
+                        Toast.makeText(context, "PIN salah", Toast.LENGTH_SHORT).show()
+                        currentPin = ""
+                    }
+                }
+                PinMode.APP_LOCK -> {
+                    if (authManager.verifyPinWithoutAdminElevation(currentPin)) {
                         onSuccess()
                     } else {
                         Toast.makeText(context, "PIN salah", Toast.LENGTH_SHORT).show()
@@ -258,11 +276,15 @@ fun AdminPinScreen(
 
         Spacer(Modifier.weight(1f))
         
-        TextButton(
-            onClick = onCancel,
-            modifier = Modifier.padding(bottom = 32.dp)
-        ) {
-            Text("Batal", color = PosPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        if (mode != PinMode.APP_LOCK) {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier.padding(bottom = 32.dp)
+            ) {
+                Text("Batal", color = PosPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            Spacer(Modifier.height(32.dp))
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.android.posanof.ui.product
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -12,6 +13,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,7 +32,6 @@ import com.android.posanof.data.local.entity.ProductEntity
 import com.android.posanof.data.repository.ProductRepository
 import com.android.posanof.ui.components.*
 import kotlinx.coroutines.launch
-import java.text.NumberFormat
 import java.util.Locale
 
 import com.android.posanof.data.local.SettingsManager
@@ -43,12 +44,12 @@ fun ProductManagementScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val currencyFormat = remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("id-ID")) }
 
     val allProducts by productRepository.getAllProducts().collectAsState(initial = emptyList())
     var searchQuery by remember { mutableStateOf("") }
 
     var showAddEditDialog by remember { mutableStateOf(false) }
+    var showSearchScanner by remember { mutableStateOf(false) }
     var selectedProductForEdit by remember { mutableStateOf<ProductEntity?>(null) }
     var productToDelete by remember { mutableStateOf<ProductEntity?>(null) }
 
@@ -63,7 +64,16 @@ fun ProductManagementScreen(
         }
     }
     
-    if (showAddEditDialog) {
+    if (showSearchScanner) {
+        BarcodeScannerOverlay(
+            onBarcodeScanned = { barcode ->
+                searchQuery = barcode
+                showSearchScanner = false
+            },
+            onBack = { showSearchScanner = false }
+        )
+    } else if (showAddEditDialog) {
+        BackHandler { showAddEditDialog = false }
         AddEditProductScreen(
             product = selectedProductForEdit,
             settingsManager = settingsManager,
@@ -140,44 +150,61 @@ fun ProductManagementScreen(
                 PosBadge(text = "Admin", bg = Color(0xFFE0F2F1), fg = Color(0xFF00796B))
             }
 
-            // Search Bar (rounded, white)
+            // Search Bar (rounded, white) + scan button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White)
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Search, null, tint = PosMuted, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                BasicTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    singleLine = true,
-                    textStyle = TextStyle(fontSize = 14.sp, color = PosInk),
-                    cursorBrush = SolidColor(PosPrimary),
-                    modifier = Modifier.weight(1f),
-                    decorationBox = { inner ->
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (searchQuery.isEmpty()) {
-                                Text("Cari produk atau barcode", color = PosMuted, fontSize = 14.sp)
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Search, null, tint = PosMuted, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp))
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = TextStyle(fontSize = 14.sp, color = PosInk),
+                        cursorBrush = SolidColor(PosPrimary),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (searchQuery.isEmpty()) {
+                                    Text("Cari produk atau barcode", color = PosMuted, fontSize = 14.sp)
+                                }
+                                inner()
                             }
-                            inner()
                         }
-                    }
-                )
-                if (searchQuery.isNotEmpty()) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Hapus",
-                        tint = PosMuted,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clickable { searchQuery = "" }
                     )
+                    if (searchQuery.isNotEmpty()) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Hapus",
+                            tint = PosMuted,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clickable { searchQuery = "" }
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(PosPrimary)
+                        .clickable { showSearchScanner = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, "Scan barcode", tint = Color.White)
                 }
             }
             
@@ -190,7 +217,6 @@ fun ProductManagementScreen(
                 items(filteredProducts, key = { it.id }) { product ->
                     ProductItemRow(
                         product = product,
-                        currencyFormat = currencyFormat,
                         onEdit = {
                             selectedProductForEdit = product
                             showAddEditDialog = true
@@ -255,7 +281,6 @@ fun ProductManagementScreen(
 @Composable
 private fun ProductItemRow(
     product: ProductEntity,
-    currencyFormat: NumberFormat,
     onEdit: () -> Unit
 ) {
     val isLowStock = product.stock <= product.minStock
@@ -264,7 +289,11 @@ private fun ProductItemRow(
     val stockTextColor = if (isLowStock) PosWarnText else PosMuted
     val stockText = if (isLowStock) "Stok ${product.stock} · menipis" else "Stok ${product.stock}"
 
-    PosCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit), color = bgColor) {
+    PosCard(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onEdit), 
+        color = bgColor,
+        borderColor = borderColor
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -284,7 +313,7 @@ private fun ProductItemRow(
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = currencyFormat.format(product.price).removePrefix("Rp").replace(",00", ""),
+                        text = product.price.toLong().toRupiah(),
                         fontSize = 12.sp,
                         color = PosInk,
                         fontWeight = FontWeight.Medium
