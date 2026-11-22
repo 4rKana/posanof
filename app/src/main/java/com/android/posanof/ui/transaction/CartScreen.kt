@@ -1,3 +1,4 @@
+
 package com.android.posanof.ui.transaction
 
 import android.widget.Toast
@@ -19,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,8 +69,9 @@ import com.android.posanof.ui.components.PosWarningBox
 import com.android.posanof.ui.components.toRupiah
 
 // =====================================================================
-// ROUTE: menghubungkan CartScreen dengan POSTransactionViewModel
+// ROUTE: MENGHUBUNGKAN CARTSCREEN DENGAN POSTRANSACTIONVIEWMODEL
 // =====================================================================
+
 @Composable
 fun CartRoute(
     viewModel: POSTransactionViewModel,
@@ -80,7 +81,13 @@ fun CartRoute(
     val context = LocalContext.current
 
     val items by viewModel.cartItems.collectAsState()
+    val subtotal by viewModel.subtotalAmount.collectAsState()
+    val discountPercentage by viewModel.discountPercentage.collectAsState()
+    val discount by viewModel.discountAmount.collectAsState()
+    val tax by viewModel.taxAmount.collectAsState()
+    val taxEnabled by viewModel.taxEnabled.collectAsState()
     val total by viewModel.totalAmount.collectAsState()
+
     val cashAmount by viewModel.cashAmount.collectAsState()
     val changeAmount by viewModel.changeAmount.collectAsState()
     val method by viewModel.selectedPaymentMethod.collectAsState()
@@ -88,8 +95,17 @@ fun CartRoute(
     val customerPhone by viewModel.customerPhone.collectAsState()
     val checkoutResult by viewModel.checkoutResult.collectAsState()
 
-    // Setelah checkout sukses, ViewModel mengosongkan keranjang, uang, dan data pelanggan.
-    // Jadi datanya dicatat dulu sesaat sebelum checkout untuk layar sukses dan struk.
+    // Baca pengaturan Admin terbaru setiap kali halaman keranjang dibuka.
+    LaunchedEffect(Unit) {
+        viewModel.refreshAdminSettings()
+    }
+
+    // Snapshot data sebelum checkout karena ViewModel akan mengosongkan keranjang.
+    var snapSubtotal by rememberSaveable { mutableStateOf(0.0) }
+    var snapDiscount by rememberSaveable { mutableStateOf(0.0) }
+    var snapDiscountPercentage by rememberSaveable { mutableStateOf(0.0) }
+    var snapTax by rememberSaveable { mutableStateOf(0.0) }
+    var snapTaxEnabled by rememberSaveable { mutableStateOf(false) }
     var snapTotal by rememberSaveable { mutableStateOf(0.0) }
     var snapCash by rememberSaveable { mutableStateOf(0.0) }
     var snapIsCash by rememberSaveable { mutableStateOf(true) }
@@ -99,23 +115,51 @@ fun CartRoute(
     var snapItems by rememberSaveable { mutableStateOf("") }
 
     val result = checkoutResult
+
     if (result is CheckoutResult.Success) {
         val finish = {
             viewModel.resetCheckoutResult()
             onBack()
         }
+
         BackHandler(onBack = finish)
 
         val rows = mutableListOf<Pair<String, String>>()
-        rows.add("No. Transaksi" to "#" + result.transactionId.toString().padStart(4, '0'))
+
+        rows.add(
+            "No. Transaksi" to
+                    ("#" + result.transactionId.toString().padStart(4, '0'))
+        )
         rows.add("Tanggal" to formatReceiptDate(snapTime))
+
+        rows.add("Subtotal" to snapSubtotal.toLong().toRupiah())
+
+        if (snapDiscount > 0.0) {
+            rows.add(
+                "Diskon (${snapDiscountPercentage.toLong()}%)" to
+                        ("-" + snapDiscount.toLong().toRupiah())
+            )
+        }
+
+        if (snapTaxEnabled) {
+            rows.add("PPN (11%)" to snapTax.toLong().toRupiah())
+        }
+
+        rows.add("Total" to snapTotal.toLong().toRupiah())
+
         if (snapIsCash) {
             rows.add("Metode" to "Tunai")
             rows.add("Uang diterima" to snapCash.toLong().toRupiah())
-            rows.add("Kembalian" to result.changeAmount.toLong().toRupiah())
+            rows.add(
+                "Kembalian" to result.changeAmount.toLong().toRupiah()
+            )
         } else {
             rows.add("Metode" to "Kasbon")
-            if (snapName.isNotBlank()) rows.add("Pelanggan" to snapName)
+
+            if (snapName.isNotBlank()) {
+                rows.add("Pelanggan" to snapName)
+            }
+
             rows.add("Nominal hutang" to snapTotal.toLong().toRupiah())
         }
 
@@ -124,11 +168,20 @@ fun CartRoute(
             rows = rows,
             statusBadge = if (snapIsCash) null else "Belum Lunas",
             onSendWhatsApp = {
-                val text = buildReceiptText(rows, snapItems, snapTotal.toLong().toRupiah())
+                val text = buildReceiptText(
+                    rows,
+                    snapItems,
+                    snapTotal.toLong().toRupiah()
+                )
+
                 shareReceiptToWhatsApp(context, snapPhone, text)
             },
             onSavePdf = {
-                Toast.makeText(context, "Simpan PDF: segera hadir", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    context,
+                    "Simpan PDF: segera hadir",
+                    Toast.LENGTH_SHORT
+                ).show()
             },
             onNewTransaction = finish,
             modifier = modifier
@@ -136,6 +189,11 @@ fun CartRoute(
     } else {
         CartScreen(
             items = items,
+            subtotal = subtotal,
+            discountPercentage = discountPercentage,
+            discount = discount,
+            tax = tax,
+            taxEnabled = taxEnabled,
             total = total,
             cashAmount = cashAmount,
             changeAmount = changeAmount,
@@ -150,15 +208,23 @@ fun CartRoute(
             onCashChange = viewModel::updateCashAmount,
             onCustomerChange = viewModel::updateCustomerInfo,
             onCheckout = {
+                snapSubtotal = subtotal
+                snapDiscount = discount
+                snapDiscountPercentage = discountPercentage
+                snapTax = tax
+                snapTaxEnabled = taxEnabled
                 snapTotal = total
                 snapCash = cashAmount
                 snapIsCash = method == PaymentMethod.TUNAI
                 snapName = customerName.trim()
                 snapPhone = customerPhone.trim()
                 snapTime = System.currentTimeMillis()
+
                 snapItems = items.joinToString("\n") {
-                    "${it.quantity}x ${it.product.name} - ${it.subTotal.toLong().toRupiah()}"
+                    "${it.quantity}x ${it.product.name} - " +
+                            "${it.subTotal.toLong().toRupiah()}"
                 }
+
                 viewModel.checkout()
             },
             modifier = modifier
@@ -167,21 +233,35 @@ fun CartRoute(
 
     if (result is CheckoutResult.Error) {
         LaunchedEffect(result.message) {
-            Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                result.message,
+                Toast.LENGTH_LONG
+            ).show()
+
             viewModel.resetCheckoutResult()
         }
     }
 }
 
 private fun formatReceiptDate(millis: Long): String =
-    SimpleDateFormat("dd MMM yyyy, HH.mm", Locale.forLanguageTag("id-ID")).format(Date(millis))
+    SimpleDateFormat(
+        "dd MMM yyyy, HH.mm",
+        Locale.forLanguageTag("id-ID")
+    ).format(Date(millis))
 
 // =====================================================================
-// 3 & 4. KERANJANG (Tunai / Kasbon)
+// KERANJANG: TUNAI / KASBON
 // =====================================================================
+
 @Composable
 fun CartScreen(
     items: List<CartItem>,
+    subtotal: Double,
+    discountPercentage: Double,
+    discount: Double,
+    tax: Double,
+    taxEnabled: Boolean,
     total: Double,
     cashAmount: Double,
     changeAmount: Double,
@@ -201,32 +281,68 @@ fun CartScreen(
     val isCash = method == PaymentMethod.TUNAI
     val totalLong = total.toLong()
     val segmentIndex = if (isCash) 0 else 1
+
     val onSegmentSelect: (Int) -> Unit = {
-        onMethodChange(if (it == 0) PaymentMethod.TUNAI else PaymentMethod.KASBON)
+        onMethodChange(
+            if (it == 0) PaymentMethod.TUNAI
+            else PaymentMethod.KASBON
+        )
     }
 
-    Column(modifier.fillMaxSize().background(PosBackground)) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(PosBackground)
+    ) {
         PosTopBar(
             title = "Keranjang",
             onBack = onBack,
             trailing = {
                 if (items.isNotEmpty()) {
                     TextButton(onClick = onClearCart) {
-                        Text("Kosongkan", color = PosDanger, fontSize = 12.sp)
+                        Text(
+                            "Kosongkan",
+                            color = PosDanger,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
         )
 
         if (items.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.ShoppingCart, null, tint = PosMuted, modifier = Modifier.size(44.dp))
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        Icons.Default.ShoppingCart,
+                        null,
+                        tint = PosMuted,
+                        modifier = Modifier.size(44.dp)
+                    )
+
                     Spacer(Modifier.height(10.dp))
-                    Text("Keranjang masih kosong", color = PosMuted, fontSize = 14.sp)
+
+                    Text(
+                        "Keranjang masih kosong",
+                        color = PosMuted,
+                        fontSize = 14.sp
+                    )
+
                     Spacer(Modifier.height(8.dp))
+
                     TextButton(onClick = onBack) {
-                        Text("Kembali ke Kasir", color = PosPrimary, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Kembali ke Kasir",
+                            color = PosPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
@@ -239,60 +355,132 @@ fun CartScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (isCash) {
-                    // ---------- Tunai (layar 3) ----------
+                    // ---------- TUNAI ----------
+
                     PosCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(horizontal = 12.dp)) {
+                        Column(
+                            Modifier.padding(horizontal = 12.dp)
+                        ) {
                             items.forEachIndexed { index, item ->
-                                if (index > 0) HorizontalDivider(color = PosBorder)
+                                if (index > 0) {
+                                    HorizontalDivider(color = PosBorder)
+                                }
+
                                 CartLineRow(item, onQuantityChange)
                             }
                         }
                     }
 
+                    // RINCIAN PEMBAYARAN
                     PosCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SummaryRow("Subtotal", totalLong.toRupiah())
-                            SummaryRow("Diskon", "Rp 0")
-                            SummaryRow("Pajak", "Rp 0")
-                            HorizontalDivider(color = PosBorder, modifier = Modifier.padding(vertical = 4.dp))
-                            SummaryRow("Total", totalLong.toRupiah(), bold = true)
+                        Column(
+                            Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            SummaryRow(
+                                "Subtotal",
+                                subtotal.toLong().toRupiah()
+                            )
+
+                            SummaryRow(
+                                "Diskon (${discountPercentage.toLong()}%)",
+                                if (discount > 0.0) {
+                                    "-${discount.toLong().toRupiah()}"
+                                } else {
+                                    discount.toLong().toRupiah()
+                                }
+                            )
+
+                            SummaryRow(
+                                if (taxEnabled) "PPN (11%)" else "Pajak",
+                                tax.toLong().toRupiah()
+                            )
+
+                            HorizontalDivider(
+                                color = PosBorder,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+
+                            SummaryRow(
+                                "Total",
+                                totalLong.toRupiah(),
+                                bold = true
+                            )
                         }
                     }
 
-                    PosSegmented(listOf("Tunai", "Kasbon"), segmentIndex, onSegmentSelect)
+                    PosSegmented(
+                        listOf("Tunai", "Kasbon"),
+                        segmentIndex,
+                        onSegmentSelect
+                    )
 
                     PosTextField(
                         label = "Uang diterima",
-                        value = if (cashAmount == 0.0) "" else cashAmount.toLong().toString(),
-                        onValueChange = { onCashChange(it.filter(Char::isDigit).toDoubleOrNull() ?: 0.0) },
+                        value = if (cashAmount == 0.0) {
+                            ""
+                        } else {
+                            cashAmount.toLong().toString()
+                        },
+                        onValueChange = {
+                            onCashChange(
+                                it.filter(Char::isDigit)
+                                    .toDoubleOrNull() ?: 0.0
+                            )
+                        },
                         placeholder = "Rp 0",
                         keyboardType = KeyboardType.Number
                     )
 
-                    // Uang pas + 2 nominal terdekat yang cukup untuk membayar
-                    val suggestions = listOf(20_000L, 50_000L, 100_000L, 200_000L)
+                    // UANG PAS + 2 NOMINAL TERDEKAT
+                    val suggestions = listOf(
+                        20_000L,
+                        50_000L,
+                        100_000L,
+                        200_000L
+                    )
                         .filter { it >= totalLong }
                         .take(2)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        QuickCashChip("Uang pas", Modifier.weight(1f)) { onCashChange(total) }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        QuickCashChip(
+                            "Uang pas",
+                            Modifier.weight(1f)
+                        ) {
+                            onCashChange(total)
+                        }
+
                         suggestions.forEach { nominal ->
                             QuickCashChip(
                                 nominal.toRupiah().removePrefix("Rp "),
                                 Modifier.weight(1f)
-                            ) { onCashChange(nominal.toDouble()) }
+                            ) {
+                                onCashChange(nominal.toDouble())
+                            }
                         }
                     }
 
                     val shortfall = total - cashAmount
                     val isShort = cashAmount > 0.0 && shortfall > 0.0
+
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .background(
-                                if (isShort) Color(0xFFFDE8E6) else PosSoft,
+                                if (isShort) {
+                                    Color(0xFFFDE8E6)
+                                } else {
+                                    PosSoft
+                                },
                                 RoundedCornerShape(10.dp)
                             )
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                            .padding(
+                                horizontal = 14.dp,
+                                vertical = 12.dp
+                            ),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
@@ -301,62 +489,128 @@ fun CartScreen(
                             color = PosInk,
                             fontSize = 13.sp
                         )
+
                         Text(
-                            (if (isShort) shortfall else changeAmount).toLong().toRupiah(),
+                            (if (isShort) shortfall else changeAmount)
+                                .toLong()
+                                .toRupiah(),
                             color = if (isShort) PosDanger else PosPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
                     }
                 } else {
-                    // ---------- Kasbon (layar 4) ----------
+                    // ---------- KASBON ----------
+
                     PosCard(Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "${items.size} produk · ${items.sumOf { it.quantity }} item",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp
-                                )
-                                Text("Total belanja", fontSize = 11.sp, color = PosMuted)
-                            }
-                            Text(totalLong.toRupiah(), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Column(
+                            Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "${items.size} produk · " +
+                                        "${items.sumOf { it.quantity }} item",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+
+                            Text(
+                                "Rincian tagihan",
+                                fontSize = 11.sp,
+                                color = PosMuted
+                            )
+
+                            HorizontalDivider(color = PosBorder)
+
+                            SummaryRow(
+                                "Subtotal",
+                                subtotal.toLong().toRupiah()
+                            )
+
+                            SummaryRow(
+                                "Diskon (${discountPercentage.toLong()}%)",
+                                if (discount > 0.0) {
+                                    "-${discount.toLong().toRupiah()}"
+                                } else {
+                                    discount.toLong().toRupiah()
+                                }
+                            )
+
+                            SummaryRow(
+                                if (taxEnabled) "PPN (11%)" else "Pajak",
+                                tax.toLong().toRupiah()
+                            )
+
+                            HorizontalDivider(
+                                color = PosBorder,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+
+                            SummaryRow(
+                                "Total hutang",
+                                totalLong.toRupiah(),
+                                bold = true
+                            )
                         }
                     }
 
-                    PosSegmented(listOf("Tunai", "Kasbon"), segmentIndex, onSegmentSelect)
+                    PosSegmented(
+                        listOf("Tunai", "Kasbon"),
+                        segmentIndex,
+                        onSegmentSelect
+                    )
 
                     PosTextField(
                         label = "Nama pelanggan",
                         value = customerName,
-                        onValueChange = { onCustomerChange(it, customerPhone) },
+                        onValueChange = {
+                            onCustomerChange(it, customerPhone)
+                        },
                         placeholder = "Contoh: Bu Ratna"
                     )
+
                     PosTextField(
                         label = "No. HP / WhatsApp (opsional)",
                         value = customerPhone,
-                        onValueChange = { onCustomerChange(customerName, it) },
+                        onValueChange = {
+                            onCustomerChange(customerName, it)
+                        },
                         placeholder = "0812 3456 7890",
                         keyboardType = KeyboardType.Phone
                     )
-                    // Hutang dicatat sebesar total belanja (sesuai logika checkout yang ada)
-                    ReadOnlyField("Nominal hutang", totalLong.toRupiah())
 
-                    PosWarningBox("Dicatat sebagai piutang pelanggan.\nStok otomatis berkurang setelah disimpan.")
+                    ReadOnlyField(
+                        "Nominal hutang",
+                        totalLong.toRupiah()
+                    )
+
+                    PosWarningBox(
+                        "Dicatat sebagai piutang pelanggan.\n" +
+                                "Stok otomatis berkurang setelah disimpan."
+                    )
                 }
+
                 Spacer(Modifier.height(4.dp))
             }
 
             Box(Modifier.padding(16.dp)) {
                 if (isCash) {
                     PosPrimaryButton(
-                        text = if (isProcessing) "Memproses..." else "Bayar ${totalLong.toRupiah()}",
+                        text = if (isProcessing) {
+                            "Memproses..."
+                        } else {
+                            "Bayar ${totalLong.toRupiah()}"
+                        },
                         onClick = onCheckout,
                         enabled = cashAmount >= total && !isProcessing
                     )
                 } else {
                     PosPrimaryButton(
-                        text = if (isProcessing) "Memproses..." else "Simpan Kasbon",
+                        text = if (isProcessing) {
+                            "Memproses..."
+                        } else {
+                            "Simpan Kasbon"
+                        },
                         onClick = onCheckout,
                         enabled = customerName.isNotBlank() && !isProcessing
                     )
@@ -367,10 +621,16 @@ fun CartScreen(
 }
 
 @Composable
-private fun CartLineRow(item: CartItem, onQuantityChange: (Int, Int) -> Unit) {
+private fun CartLineRow(
+    item: CartItem,
+    onQuantityChange: (Int, Int) -> Unit
+) {
     val product = item.product
+
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
@@ -382,6 +642,7 @@ private fun CartLineRow(item: CartItem, onQuantityChange: (Int, Int) -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+
             Text(
                 "${product.price.toLong().toRupiah()} / pcs",
                 fontSize = 11.sp,
@@ -390,9 +651,15 @@ private fun CartLineRow(item: CartItem, onQuantityChange: (Int, Int) -> Unit) {
                 overflow = TextOverflow.Ellipsis
             )
         }
-        StepButton(Icons.Default.Remove, filled = false, enabled = true) {
-            onQuantityChange(product.id, item.quantity - 1) // 0 = hapus dari keranjang
+
+        StepButton(
+            Icons.Default.Remove,
+            filled = false,
+            enabled = true
+        ) {
+            onQuantityChange(product.id, item.quantity - 1)
         }
+
         Text(
             "${item.quantity}",
             Modifier.widthIn(min = 28.dp),
@@ -402,12 +669,22 @@ private fun CartLineRow(item: CartItem, onQuantityChange: (Int, Int) -> Unit) {
             maxLines = 1,
             softWrap = false
         )
-        StepButton(Icons.Default.Add, filled = true, enabled = item.quantity < product.stock) {
+
+        StepButton(
+            Icons.Default.Add,
+            filled = true,
+            enabled = item.quantity < product.stock
+        ) {
             onQuantityChange(product.id, item.quantity + 1)
         }
+
         Text(
-            item.subTotal.toLong().toRupiah().removePrefix("Rp "),
-            Modifier.widthIn(min = 64.dp).padding(start = 6.dp),
+            item.subTotal.toLong()
+                .toRupiah()
+                .removePrefix("Rp "),
+            Modifier
+                .widthIn(min = 64.dp)
+                .padding(start = 6.dp),
             textAlign = TextAlign.End,
             fontWeight = FontWeight.SemiBold,
             fontSize = 13.sp,
@@ -418,8 +695,14 @@ private fun CartLineRow(item: CartItem, onQuantityChange: (Int, Int) -> Unit) {
 }
 
 @Composable
-private fun StepButton(icon: ImageVector, filled: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun StepButton(
+    icon: ImageVector,
+    filled: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
     val shape = RoundedCornerShape(7.dp)
+
     Box(
         Modifier
             .size(26.dp)
@@ -430,15 +713,24 @@ private fun StepButton(icon: ImageVector, filled: Boolean, enabled: Boolean, onC
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            icon, null,
-            tint = if (enabled) PosPrimary else PosMuted.copy(alpha = 0.4f),
+            icon,
+            null,
+            tint = if (enabled) {
+                PosPrimary
+            } else {
+                PosMuted.copy(alpha = 0.4f)
+            },
             modifier = Modifier.size(14.dp)
         )
     }
 }
 
 @Composable
-private fun SummaryRow(label: String, value: String, bold: Boolean = false) {
+private fun SummaryRow(
+    label: String,
+    value: String,
+    bold: Boolean = false
+) {
     Row(Modifier.fillMaxWidth()) {
         Text(
             label,
@@ -447,6 +739,7 @@ private fun SummaryRow(label: String, value: String, bold: Boolean = false) {
             fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
             color = if (bold) PosInk else PosMuted
         )
+
         Text(
             value,
             fontSize = if (bold) 14.sp else 12.sp,
@@ -457,8 +750,13 @@ private fun SummaryRow(label: String, value: String, bold: Boolean = false) {
 }
 
 @Composable
-private fun QuickCashChip(label: String, modifier: Modifier, onClick: () -> Unit) {
+private fun QuickCashChip(
+    label: String,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
     val shape = RoundedCornerShape(10.dp)
+
     Box(
         modifier
             .clip(shape)
@@ -468,15 +766,30 @@ private fun QuickCashChip(label: String, modifier: Modifier, onClick: () -> Unit
             .padding(vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = PosInk)
+        Text(
+            label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = PosInk
+        )
     }
 }
 
 @Composable
-private fun ReadOnlyField(label: String, value: String) {
+private fun ReadOnlyField(
+    label: String,
+    value: String
+) {
     Column(Modifier.fillMaxWidth()) {
-        Text(label, fontSize = 11.sp, color = PosPrimary, fontWeight = FontWeight.Medium)
+        Text(
+            label,
+            fontSize = 11.sp,
+            color = PosPrimary,
+            fontWeight = FontWeight.Medium
+        )
+
         Spacer(Modifier.height(4.dp))
+
         Box(
             Modifier
                 .fillMaxWidth()
@@ -486,30 +799,81 @@ private fun ReadOnlyField(label: String, value: String) {
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
-            Text(value, fontSize = 14.sp, color = PosInk)
+            Text(
+                value,
+                fontSize = 14.sp,
+                color = PosInk
+            )
         }
     }
 }
 
 // =====================================================================
-// PREVIEW (data seperti Figma)
+// PREVIEW
 // =====================================================================
+
 @Preview(showBackground = true, widthDp = 360, heightDp = 780)
 @Composable
 private fun CartScreenPreview() {
     val items = listOf(
-        CartItem(ProductEntity(id = 1, name = "Teh Botol 450ml", price = 4_000.0, stock = 48), 2),
-        CartItem(ProductEntity(id = 2, name = "Mie Instan Goreng", price = 3_500.0, stock = 120), 5),
-        CartItem(ProductEntity(id = 3, name = "Kopi Sachet", price = 2_000.0, stock = 6), 3)
+        CartItem(
+            ProductEntity(
+                id = 1,
+                name = "Teh Botol 450ml",
+                price = 4_000.0,
+                stock = 48
+            ),
+            2
+        ),
+        CartItem(
+            ProductEntity(
+                id = 2,
+                name = "Mie Instan Goreng",
+                price = 3_500.0,
+                stock = 120
+            ),
+            5
+        ),
+        CartItem(
+            ProductEntity(
+                id = 3,
+                name = "Kopi Sachet",
+                price = 2_000.0,
+                stock = 6
+            ),
+            3
+        )
     )
-    val total = items.sumOf { it.subTotal }
-    var method by remember { mutableStateOf(PaymentMethod.TUNAI) }
-    var cash by remember { mutableStateOf(50_000.0) }
-    var name by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
+
+    val subtotal = items.sumOf { it.subTotal }
+    val discountPercentage = 10.0
+    val discount = subtotal * discountPercentage / 100.0
+    val tax = (subtotal - discount) * 0.11
+    val total = subtotal - discount + tax
+
+    var method by remember {
+        mutableStateOf(PaymentMethod.TUNAI)
+    }
+
+    var cash by remember {
+        mutableStateOf(50_000.0)
+    }
+
+    var name by remember {
+        mutableStateOf("")
+    }
+
+    var phone by remember {
+        mutableStateOf("")
+    }
 
     CartScreen(
         items = items,
+        subtotal = subtotal,
+        discountPercentage = discountPercentage,
+        discount = discount,
+        tax = tax,
+        taxEnabled = true,
         total = total,
         cashAmount = cash,
         changeAmount = if (cash >= total) cash - total else 0.0,
@@ -522,7 +886,10 @@ private fun CartScreenPreview() {
         onClearCart = {},
         onMethodChange = { method = it },
         onCashChange = { cash = it },
-        onCustomerChange = { n, p -> name = n; phone = p },
+        onCustomerChange = { n, p ->
+            name = n
+            phone = p
+        },
         onCheckout = {}
     )
 }

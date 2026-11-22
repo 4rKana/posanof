@@ -1,3 +1,4 @@
+
 package com.android.posanof.ui.navigation
 
 import androidx.compose.foundation.layout.Box
@@ -9,15 +10,13 @@ import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.PointOfSale
-import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,15 +25,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import com.android.posanof.data.repository.BackupRepository
 import com.android.posanof.data.repository.ProductRepository
 import com.android.posanof.data.repository.TransactionRepository
 import com.android.posanof.security.AuthManager
-import com.android.posanof.ui.components.AdminPinDialog
+import com.android.posanof.ui.admin.AdminScreen
+import com.android.posanof.ui.components.AdminPinScreen
 import com.android.posanof.ui.components.PosMuted
 import com.android.posanof.ui.components.PosPrimary
 import com.android.posanof.ui.components.PosSoft
@@ -45,27 +44,54 @@ import com.android.posanof.ui.report.ReportAndBackupScreen
 import com.android.posanof.ui.transaction.KasirRoute
 import com.android.posanof.ui.transaction.POSTransactionViewModel
 
+sealed class Screen(
+    val route: String,
+    val title: String,
+    val icon: ImageVector,
+    val requiresAdminPin: Boolean = false
+) {
+    data object POS : Screen(
+        "pos",
+        "Kasir POS",
+        Icons.Default.PointOfSale
+    )
 
-sealed class Screen(val route: String, val title: String, val icon: ImageVector, val requiresAdminPin: Boolean = false) {
-    data object POS : Screen("pos", "Kasir POS", Icons.Default.PointOfSale)
-    data object Credit : Screen("credit", "Piutang Kasbon", Icons.AutoMirrored.Filled.ReceiptLong)
-    data object MasterProduct : Screen("product", "Master Produk", Icons.Default.Inventory, requiresAdminPin = true)
-    data object ReportBackup : Screen("report", "Laporan & Backup", Icons.Default.Assessment, requiresAdminPin = true)
-    data object Logout : Screen("logout", "Keluar", Icons.Default.Logout)
+    data object Credit : Screen(
+        "credit",
+        "Piutang Kasbon",
+        Icons.AutoMirrored.Filled.ReceiptLong
+    )
+
+    data object MasterProduct : Screen(
+        "product",
+        "Master Produk",
+        Icons.Default.Inventory,
+        requiresAdminPin = true
+    )
+
+    data object ReportBackup : Screen(
+        "report",
+        "Laporan & Backup",
+        Icons.Default.Assessment,
+        requiresAdminPin = true
+    )
+
+    data object Admin : Screen(
+        "admin",
+        "Admin",
+        Icons.Default.Settings,
+        requiresAdminPin = true
+    )
 }
 
-/** Label pendek untuk bottom bar supaya tidak terpotong. */
 private fun shortLabel(screen: Screen): String = when (screen) {
     Screen.POS -> "Kasir"
     Screen.Credit -> "Kasbon"
     Screen.MasterProduct -> "Produk"
     Screen.ReportBackup -> "Laporan"
-    Screen.Logout -> "Keluar"
+    Screen.Admin -> "Admin"
 }
 
-/**
- * Komponen Utama Navigasi Aplikasi POSANOF dengan Material3 NavigationBar.
- */
 @Composable
 fun MainAppNavigation(
     posViewModel: POSTransactionViewModel,
@@ -76,65 +102,95 @@ fun MainAppNavigation(
     authManager: AuthManager,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
+    var currentScreen by remember {
+        mutableStateOf<Screen>(Screen.POS)
+    }
 
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.POS) }
-    var pendingScreen by remember { mutableStateOf<Screen?>(null) }
-    var showPinDialog by remember { mutableStateOf(false) }
-    var showLogoutDialog by remember { mutableStateOf(false)}
+    var pendingScreen by remember {
+        mutableStateOf<Screen?>(null)
+    }
+
+    var showPinScreen by remember {
+        mutableStateOf(false)
+    }
 
     val navItems = listOf(
         Screen.POS,
         Screen.Credit,
         Screen.MasterProduct,
         Screen.ReportBackup,
-        Screen.Logout
+        Screen.Admin
     )
 
     Scaffold(
         bottomBar = {
-            NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
-                navItems.forEach { screen ->
-                    val selected = if (screen is Screen.Logout) false else currentScreen.route == screen.route
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            if (screen is Screen.Logout) {
-                                showLogoutDialog = true
-                            } else if (screen.requiresAdminPin && !authManager.isAdminSessionActive()) {
-                                pendingScreen = screen
-                                showPinDialog = true
-                            } else {
-                                currentScreen = screen
-                            }
-                        },
-                        icon = { Icon(imageVector = screen.icon, contentDescription = screen.title, modifier = Modifier.size(22.dp)) },
-                        label = {
-                            Text(
-                                shortLabel(screen),
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            if (!showPinScreen) {
+                NavigationBar(
+                    containerColor = Color.White,
+                    tonalElevation = 0.dp
+                ) {
+                    navItems.forEach { screen ->
+                        val selected =
+                            currentScreen.route == screen.route
+
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = {
+                                if (
+                                    screen.requiresAdminPin &&
+                                    !authManager.isAdminSessionActive()
+                                ) {
+                                    pendingScreen = screen
+                                    showPinScreen = true
+                                } else {
+                                    currentScreen = screen
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = screen.icon,
+                                    contentDescription = screen.title,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = shortLabel(screen),
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    fontWeight = if (selected) {
+                                        FontWeight.SemiBold
+                                    } else {
+                                        FontWeight.Normal
+                                    }
+                                )
+                            },
+                            alwaysShowLabel = true,
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = PosPrimary,
+                                selectedTextColor = PosPrimary,
+                                indicatorColor = PosSoft,
+                                unselectedIconColor = PosMuted,
+                                unselectedTextColor = PosMuted
                             )
-                        },
-                        alwaysShowLabel = true,
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = PosPrimary,
-                            selectedTextColor = PosPrimary,
-                            indicatorColor = PosSoft,
-                            unselectedIconColor = PosMuted,
-                            unselectedTextColor = PosMuted
                         )
-                    )
+                    }
                 }
             }
         },
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .then(
+                    if (showPinScreen) {
+                        Modifier
+                    } else {
+                        Modifier.padding(innerPadding)
+                    }
+                )
         ) {
             when (currentScreen) {
                 is Screen.POS -> {
@@ -162,61 +218,43 @@ fun MainAppNavigation(
                 is Screen.ReportBackup -> {
                     ReportAndBackupScreen(
                         transactionRepository = transactionRepository,
+                        productRepository = productRepository,
                         backupRepository = backupRepository,
+                        creditViewModel = creditViewModel,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
 
-                is Screen.Logout -> {
-
+                is Screen.Admin -> {
+                    AdminScreen(
+                        authManager = authManager,
+                        backupRepository = backupRepository,
+                        onLogout = {
+                            authManager.logoutAdmin()
+                            currentScreen = Screen.POS
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
+            }
+
+            if (showPinScreen) {
+                AdminPinScreen(
+                    authManager = authManager,
+                    onSuccess = {
+                        showPinScreen = false
+
+                        pendingScreen?.let {
+                            currentScreen = it
+                            pendingScreen = null
+                        }
+                    },
+                    onDismiss = {
+                        showPinScreen = false
+                        pendingScreen = null
+                    }
+                )
             }
         }
-    }
-
-    // Modal Admin PIN Dialog jika mengakses screen terproteksi
-    if (showPinDialog) {
-        AdminPinDialog(
-            authManager = authManager,
-            onSuccess = {
-                showPinDialog = false
-                pendingScreen?.let {
-                    currentScreen = it
-                    pendingScreen = null
-                }
-            },
-            onDismiss = {
-                showPinDialog = false
-                pendingScreen = null
-            }
-        )
-    }
-
-    // Dialog Konfirmasi Logout
-    if (showLogoutDialog) {
-        AlertDialog(
-            onDismissRequest = { showLogoutDialog = false },
-            title = { Text("Konfirmasi Keluar") },
-            text = { Text("Apakah Anda yakin ingin mengakhiri sesi admin ini?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                        authManager.logoutAdmin()
-                        android.widget.Toast.makeText(context, "Berhasil keluar Admin!", android.widget.Toast.LENGTH_SHORT).show()
-                        currentScreen = Screen.POS
-                    }
-                ) {
-                    Text("Ya, Keluar")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showLogoutDialog = false }
-                ) {
-                    Text("Batal")
-                }
-            }
-        )
     }
 }

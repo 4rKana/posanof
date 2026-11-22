@@ -1,3 +1,4 @@
+
 package com.android.posanof.security
 
 import android.content.Context
@@ -7,9 +8,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 /**
- * Manager untuk keamanan dan autentikasi berbasis EncryptedSharedPreferences.
- * Secara default, aplikasi berada dalam 'Mode Kasir' tanpa login.
- * Memerlukan verifikasi PIN saat mengakses menu Admin / Master Data.
+ * Manager autentikasi Admin Posanof.
+ * PIN Admin wajib tepat 6 digit angka.
  */
 @Suppress("DEPRECATION")
 class AuthManager private constructor(context: Context) {
@@ -18,96 +18,120 @@ class AuthManager private constructor(context: Context) {
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
         .build()
 
-    private val sharedPreferences: SharedPreferences = EncryptedSharedPreferences.create(
-        context.applicationContext,
-        PREFS_FILENAME,
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val sharedPreferences: SharedPreferences =
+        EncryptedSharedPreferences.create(
+            context.applicationContext,
+            PREFS_FILENAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
 
     @Volatile
     private var isAdminAuthenticated: Boolean = false
 
     /**
-     * Mengecek apakah PIN Admin sudah pernah dibuat/diatur sebelumnya.
+     * Mengecek apakah PIN Admin sudah dibuat.
+     * PIN lama yang bukan 6 digit dianggap tidak valid.
      */
     fun isPinSet(): Boolean {
         val storedPin = sharedPreferences.getString(KEY_ADMIN_PIN, null)
-        return !storedPin.isNullOrEmpty()
+
+        if (!isValidPinFormat(storedPin.orEmpty())) {
+            sharedPreferences.edit {
+                remove(KEY_ADMIN_PIN)
+            }
+            isAdminAuthenticated = false
+            return false
+        }
+
+        return true
     }
 
     /**
-     * Menyimpan PIN Admin baru (harus 4-6 digit angka).
-     * @param pin PIN baru yang akan disimpan.
-     * @return Boolean true jika PIN valid (4-6 digit angka) dan berhasil disimpan.
+     * Menyimpan PIN Admin baru.
+     * PIN wajib tepat 6 digit angka.
      */
     fun savePin(pin: String): Boolean {
         if (!isValidPinFormat(pin)) {
             return false
         }
+
         sharedPreferences.edit {
             putString(KEY_ADMIN_PIN, pin)
         }
+
         return true
     }
 
     /**
-     * Memverifikasi PIN input dengan PIN Admin yang tersimpan.
-     * @param inputPin PIN yang dimasukkan pengguna.
-     * @return Boolean true jika PIN cocok.
+     * Memverifikasi PIN Admin.
      */
     fun verifyPin(inputPin: String): Boolean {
-        val storedPin = sharedPreferences.getString(KEY_ADMIN_PIN, null) ?: return false
+        if (!isValidPinFormat(inputPin)) {
+            return false
+        }
+
+        val storedPin = sharedPreferences.getString(KEY_ADMIN_PIN, null)
+            ?: return false
+
+        if (!isValidPinFormat(storedPin)) {
+            return false
+        }
+
         val isCorrect = storedPin == inputPin
+
         if (isCorrect) {
             isAdminAuthenticated = true
         }
+
         return isCorrect
     }
 
     /**
-     * Mencoba login sebagai Admin dengan memasukkan PIN.
+     * Login Admin menggunakan PIN.
      */
     fun loginAdmin(inputPin: String): Boolean {
         return verifyPin(inputPin)
     }
 
     /**
-     * Mengembalikan status sesi kembali ke Mode Kasir.
+     * Logout Admin.
      */
     fun logoutAdmin() {
         isAdminAuthenticated = false
     }
 
     /**
-     * Mengecek apakah sesi pengguna saat ini berada dalam Mode Admin yang terautentikasi.
-     * Secara default bernilai false (Mode Kasir).
+     * Mengecek status sesi Admin.
      */
     fun isAdminSessionActive(): Boolean {
         return isAdminAuthenticated
     }
 
     /**
-     * Menghapus PIN tersimpan (misalnya untuk reset akun/debug).
+     * Menghapus PIN Admin.
      */
     fun clearPin() {
         sharedPreferences.edit {
             remove(KEY_ADMIN_PIN)
         }
+
         isAdminAuthenticated = false
     }
 
     /**
-     * Validasi format PIN: harus 4 sampai 6 digit angka.
+     * Validasi PIN: tepat 6 digit angka.
      */
     private fun isValidPinFormat(pin: String): Boolean {
-        return (pin.length in 4..6) && pin.all { it.isDigit() }
+        return pin.length == PIN_LENGTH &&
+                pin.all { it in '0'..'9' }
     }
 
     companion object {
         private const val PREFS_FILENAME = "posanof_secure_prefs"
         private const val KEY_ADMIN_PIN = "key_admin_pin"
+        private const val PIN_LENGTH = 6
 
         @Volatile
         private var INSTANCE: AuthManager? = null

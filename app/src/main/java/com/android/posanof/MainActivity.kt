@@ -43,7 +43,15 @@ class MainActivity : ComponentActivity() {
         }
 
         // 3. Inisialisasi ViewModels
-        val posViewModel = POSTransactionViewModel(transactionRepository)
+        val adminPreferences = getSharedPreferences(
+            "posanof_admin_settings",
+            MODE_PRIVATE
+        )
+
+        val posViewModel = POSTransactionViewModel(
+            transactionRepository,
+            adminPreferences
+        )
         val creditViewModel = CreditViewModel(creditRepository)
 
         setContent {
